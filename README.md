@@ -1,4 +1,5 @@
-# Video player in C++ using FFmpeg.
+# Video player.
+This is a basic video player using FFmpeg to process video codecs and OpenGL to display windows.
 ## Build
 create build directory
 generate makefile inside build directory:
