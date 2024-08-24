@@ -1,3 +1,6 @@
 [submodule "lib/glfw"]
 	path = lib/glfw
 	url = https://github.com/glfw/glfw
+[submodule "lib/FFmpeg"]
+	path = lib/FFmpeg
+	url = https://git.ffmpeg.org/ffmpeg.git

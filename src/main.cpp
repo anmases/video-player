@@ -1,9 +1,17 @@
 #include <stdio.h>
 #include <GLFW/glfw3.h>
+extern "C" {
+    #include <libavcodec/avcodec.h>
+    #include <libavformat/avformat.h>
+    #include <libavutil/avutil.h>
+    #include <libswscale/swscale.h>
+    #include <libswresample/swresample.h>
+}
 
 
 int main(int argc, const char** argv){
 	GLFWwindow* window;
+	
 
 	if(!glfwInit()){
 		printf("Couldn't initialize window\n");
