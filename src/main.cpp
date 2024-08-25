@@ -27,6 +27,9 @@ int main(int argc, const char** argv){
 		return 1;
 	}
 
+	// Actualizar el tamaño de la ventana a las dimensiones del frame
+	glfwSetWindowSize(window, frame_width, frame_height);
+
 	//Crear la ventana.
 	glfwMakeContextCurrent(window);
 	//Crear una textura
@@ -50,7 +53,7 @@ int main(int argc, const char** argv){
 		glfwGetFramebufferSize(window, &window_width, &window_height);
 		glMatrixMode(GL_PROJECTION);
 		glLoadIdentity();
-		glOrtho(0, window_width, 0, window_height, -1, 1);
+		glOrtho(0, window_width, window_height, 0, -1, 1);
 		glMatrixMode(GL_MODELVIEW);
 
 		//render texture
