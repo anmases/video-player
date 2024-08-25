@@ -89,18 +89,32 @@ bool load_frame(const char* filename, int* width_out, int* height_out, unsigned 
 		av_packet_unref(av_packet);
 		break;
 	}
-	unsigned char* data = new unsigned char[av_frame->width * av_frame->height * 3];
-	for(int x = 0; x < av_frame->width; ++x){
-		for(int y=0; y < av_frame->height; ++y){
-			data[y * av_frame->width * 3 + x * 3] = av_frame->data[0][y * av_frame->linesize[0] + x];
-			data[y * av_frame->width * 3 + x * 3 + 1] = av_frame->data[0][y * av_frame->linesize[0] + x];
-			data[y * av_frame->width * 3 + x * 3 + 2] = av_frame->data[0][y * av_frame->linesize[0] + x];
-		}
+	//buffer for 4 bytes (RGBA)
+	uint8_t* data = new uint8_t[av_frame->width * av_frame->height * 4];
+	SwsContext* sws_context = sws_getContext(
+			av_frame->width, //tamaño origen
+			av_frame->height,
+			codec_context->pix_fmt,
+			av_frame->width, //tamaño destino
+			av_frame->height,
+			AV_PIX_FMT_RGB0,
+			SWS_BILINEAR,
+			nullptr, nullptr, nullptr
+		);
+	if(!sws_context){
+		printf("couldn't initialize sw scaler\n");
+		return false;
 	}
+	uint8_t* dest[4] = {data, NULL, NULL, NULL};
+	int dest_linesize[4] = {av_frame->width * 4, 0, 0, 0};
+	sws_scale(sws_context, av_frame->data, av_frame->linesize, 0, av_frame->height, dest, dest_linesize);
+
 	*width_out = av_frame->width;
 	*height_out = av_frame->height;
 	*data_out = data;
+
 	//Clean codec and format context
+	sws_freeContext(sws_context);
 	avformat_close_input(&format_context);
 	avformat_free_context(format_context);
 	av_frame_free(&av_frame);
