@@ -21,7 +21,7 @@ make -j8
 create build directory
 generate makefile inside build directory:
 ```bash
-
+cmake -G "MinGW Makefiles" .. -DCMAKE_TOOLCHAIN_FILE="C:/Users/antonio/Development/vcpkg/scripts/buildsystems/vcpkg.cmake"
 ```
 then, execute:
 ```bash
