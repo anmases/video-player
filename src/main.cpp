@@ -45,8 +45,6 @@ int main(int argc, const char** argv){
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
 
-	
-
 	while(!glfwWindowShouldClose(window)){
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -60,9 +58,20 @@ int main(int argc, const char** argv){
 		glMatrixMode(GL_MODELVIEW);
 
 		//Read frame and load into texture.
-		if(!video_reader_read_frame(&vr_state, frame_data)){
+		int64_t pts;
+		if(!video_reader_read_frame(&vr_state, frame_data, &pts)){
 			printf("Couldn't load video frame\n");
 			return 1;
+		}
+		static bool first_frame = true;
+		if(first_frame){
+			glfwSetTime(0.0);
+			first_frame = false;
+		}
+		double time = glfwGetTime();
+		double pt_seconds = pts * (double)vr_state.time_base.num / (double)vr_state.time_base.den;
+		while(pt_seconds > glfwGetTime()){
+			glfwWaitEventsTimeout(pt_seconds - glfwGetTime());
 		}
 		glBindTexture(GL_TEXTURE_2D, tex_handle);
 		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, frame_width, frame_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, frame_data);

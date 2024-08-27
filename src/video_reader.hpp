@@ -14,17 +14,18 @@ struct VideoReaderState {
 	int width;
 	int height;
 
-
+	AVRational time_base;
 	AVFormatContext* format_context;
 	AVCodecContext* codec_context;
 	SwsContext* sws_context;
 	AVFrame* av_frame;
 	AVPacket* av_packet;
 	int video_stream_index;
+
 };
 
 bool video_reader_open(VideoReaderState* state, const char* filename);
-bool video_reader_read_frame(VideoReaderState* state, uint8_t* frame_buffer);
+bool video_reader_read_frame(VideoReaderState* state, uint8_t* frame_buffer, int64_t* pts);
 void video_reader_close(VideoReaderState* state);
 
 #endif
