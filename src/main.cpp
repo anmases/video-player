@@ -3,7 +3,6 @@
 #include <GLFW/glfw3.h>
 #include "video_reader.hpp"
 
-bool load_frame(const char* filename, int* width, int* height, unsigned char** data);
 
 int main(int argc, const char** argv){
 	GLFWwindow* window;
