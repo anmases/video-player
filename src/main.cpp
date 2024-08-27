@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <iostream>
 #include <GLFW/glfw3.h>
-
+#include "video_reader.hpp"
 
 bool load_frame(const char* filename, int* width, int* height, unsigned char** data);
 
@@ -19,19 +19,21 @@ int main(int argc, const char** argv){
 		return 1;
 	}
 
-	int frame_width;
-	int frame_height;
-	unsigned char* frame_data;
-	if(!load_frame("C:\\Users\\antonio\\Desktop\\test.mp4", &frame_width, &frame_height, &frame_data)){
-		printf("couldn't load video frame\n");
+	//Crear la ventana.
+	glfwMakeContextCurrent(window);
+
+	VideoReaderState vr_state;
+	if(!video_reader_open(&vr_state, "C:\\Users\\antonio\\Desktop\\test.mp4")){
+		printf("Couldn't open video file\n");
 		return 1;
 	}
+	const int frame_width = vr_state.width;
+	const int frame_height = vr_state.height;
+	uint8_t* frame_data = new uint8_t[frame_width * frame_height * 4];
 
 	// Actualizar el tamaño de la ventana a las dimensiones del frame
 	glfwSetWindowSize(window, frame_width, frame_height);
 
-	//Crear la ventana.
-	glfwMakeContextCurrent(window);
 	//Crear una textura
 	GLuint tex_handle;
 	glGenTextures(1, &tex_handle);
@@ -42,7 +44,8 @@ int main(int argc, const char** argv){
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, frame_width, frame_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, frame_data);
+
+	
 
 	while(!glfwWindowShouldClose(window)){
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -55,6 +58,14 @@ int main(int argc, const char** argv){
 		glLoadIdentity();
 		glOrtho(0, window_width, window_height, 0, -1, 1);
 		glMatrixMode(GL_MODELVIEW);
+
+		//Read frame and load into texture.
+		if(!video_reader_read_frame(&vr_state, frame_data)){
+			printf("Couldn't load video frame\n");
+			return 1;
+		}
+		glBindTexture(GL_TEXTURE_2D, tex_handle);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, frame_width, frame_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, frame_data);
 
 		//render texture
 		glEnable(GL_TEXTURE_2D);
@@ -70,5 +81,6 @@ int main(int argc, const char** argv){
 		glfwSwapBuffers(window);
 		glfwPollEvents();
 	}
+	video_reader_close(&vr_state);
 	return 0;
 }

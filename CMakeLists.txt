@@ -20,7 +20,8 @@ endif()
 # Archivos fuente
 list(APPEND SOURCES
     src/main.cpp
-    src/load_frame.cpp
+		src/video_reader.cpp
+		src/video_reader.hpp
 )
 
 # Crear el ejecutable
