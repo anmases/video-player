@@ -1,9 +1,6 @@
 [submodule "lib/glfw"]
 	path = lib/glfw
 	url = https://github.com/glfw/glfw
-[submodule "lib/FFmpeg"]
-	path = lib/FFmpeg
-	url = https://git.ffmpeg.org/ffmpeg.git
-[submodule "lib/SDL2"]
-	path = lib/SDL2
+[submodule "lib/SDL3"]
+	path = lib/SDL3
 	url = https://github.com/libsdl-org/SDL.git
