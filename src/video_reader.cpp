@@ -1,87 +1,148 @@
 #include "video_reader.hpp"
 
-bool video_reader_open(VideoReaderState* state, const char* filename){
-	auto& width = state->width;
-	auto& height = state->height;
-	auto& time_base = state->time_base;
-	auto& format_context = state->format_context;
-	auto& codec_context = state->codec_context;
-	auto& av_frame = state->av_frame;
-	auto& av_packet = state->av_packet;
-	auto& sws_context = state->sws_context;
-	auto& video_stream_index = state->video_stream_index;
-//open the file using avformat
-	format_context = avformat_alloc_context();
-	if(!format_context){
-		printf("Couldn't create AV format context\n");
-		return false;
-	}
-	if(avformat_open_input(&format_context, filename, NULL, NULL) != 0){
-		printf("couldn't open video file\n");
-		return false;
-	}
+bool video_reader_open(VideoReaderState* state, const char* filename) {
+    auto& width = state->width;
+    auto& height = state->height;
+    auto& time_base = state->time_base;
+    auto& format_context = state->format_context;
+    auto& video_codec_context = state->video_codec_context;
+    auto& audio_codec_context = state->audio_codec_context;
+    auto& av_frame = state->av_frame;
+    auto& av_packet = state->av_packet;
+    auto& sws_context = state->sws_context;
+		auto& swr_context = state->swr_context;
+    auto& video_stream_index = state->video_stream_index;
+    auto& audio_stream_index = state->audio_stream_index;
 
-	//find the video stream.
-	video_stream_index = -1;
-	const AVCodec* av_codec;
-	AVCodecParameters* av_codec_params;
-	for(int i=0; i< format_context->nb_streams; i++){
-		AVStream* stream = format_context->streams[i];
-		av_codec_params = stream->codecpar;
-		av_codec = avcodec_find_decoder(av_codec_params->codec_id);
-		if(!av_codec){
-			continue;
-		}
-		if(av_codec_params->codec_type == AVMEDIA_TYPE_VIDEO){
-			video_stream_index = i;
-			width = av_codec_params->width;
-			height = av_codec_params->height;
-			time_base = format_context->streams[i]->time_base;
-			break;
-		}
-	}
+    // Abrir el archivo usando avformat
+    format_context = avformat_alloc_context();
+    if (!format_context) {
+        printf("Couldn't create AV format context\n");
+        return false;
+    }
+    if (avformat_open_input(&format_context, filename, NULL, NULL) != 0) {
+        printf("Couldn't open video file\n");
+        return false;
+    }
 
-	if(video_stream_index == -1){
-		printf("couldn't find video stream index\n");
-		return false;
-	}
+    // Inicializar variables
+    video_stream_index = -1;
+    audio_stream_index = -1;
 
-	//Set up codec context for the decoder.
-	codec_context = avcodec_alloc_context3(av_codec);
-	if(!codec_context){
-		printf("Couldn't create codec context\n");
-		return false;
-	}
-	if(avcodec_parameters_to_context(codec_context, av_codec_params) < 0){
-		printf("Couldn't initialize codec context\n");
-		return false;
-	}
-	if(!avcodec_open2(codec_context, av_codec, nullptr) < 0){
-		printf("Couldn't open codec\n");
-		return false;
-	}
+    const AVCodec* video_codec = nullptr;
+    const AVCodec* audio_codec = nullptr;
+    AVCodecParameters* av_codec_params = nullptr;
 
-	av_frame = av_frame_alloc();
-	av_packet = av_packet_alloc();
-	if(!av_packet || !av_frame){
-		printf("Couldn't no longer allocate info.\n");
-		return false;
-	}
-	
-	
+    // Encontrar el flujo de video y audio
+    for (int i = 0; i < format_context->nb_streams; i++) {
+        AVStream* stream = format_context->streams[i];
+        av_codec_params = stream->codecpar;
+        const AVCodec* av_codec = avcodec_find_decoder(av_codec_params->codec_id);
+        if (!av_codec) {
+            continue;
+        }
+        if (av_codec_params->codec_type == AVMEDIA_TYPE_VIDEO && video_stream_index == -1) {
+            video_stream_index = i;
+            video_codec = av_codec;
+            width = av_codec_params->width;
+            height = av_codec_params->height;
+            time_base = stream->time_base;
+        }
+        if (av_codec_params->codec_type == AVMEDIA_TYPE_AUDIO && audio_stream_index == -1) {
+            audio_stream_index = i;
+            audio_codec = av_codec;
+        }
+    }
 
-		return true;	
+    if (video_stream_index == -1) {
+        printf("Couldn't find video stream\n");
+        return false;
+    }
+
+    if (audio_stream_index == -1) {
+        printf("Couldn't find audio stream\n");
+        return false;
+    }
+
+    // Configurar el contexto del códec de video
+    video_codec_context = avcodec_alloc_context3(video_codec);
+    if (!video_codec_context) {
+        printf("Couldn't create video codec context\n");
+        return false;
+    }
+    if (avcodec_parameters_to_context(video_codec_context, format_context->streams[video_stream_index]->codecpar) < 0) {
+        printf("Couldn't initialize video codec context\n");
+        return false;
+    }
+    if (avcodec_open2(video_codec_context, video_codec, nullptr) < 0) {
+        printf("Couldn't open video codec\n");
+        return false;
+    }
+
+    // Configurar el contexto del códec de audio
+    audio_codec_context = avcodec_alloc_context3(audio_codec);
+    if (!audio_codec_context) {
+        printf("Couldn't create audio codec context\n");
+        return false;
+    }
+    if (avcodec_parameters_to_context(audio_codec_context, format_context->streams[audio_stream_index]->codecpar) < 0) {
+        printf("Couldn't initialize audio codec context\n");
+        return false;
+    }
+    if (avcodec_open2(audio_codec_context, audio_codec, nullptr) < 0) {
+        printf("Couldn't open audio codec\n");
+        return false;
+    }
+
+		// Inicializar SwrContext para la conversión de formato de audio
+    state->swr_context = swr_alloc();
+    if (!state->swr_context) {
+        printf("Couldn't allocate SwrContext\n");
+        return false;
+    }
+
+	// Configurar SwrContext
+    av_opt_set_int(state->swr_context, "in_channel_layout",  audio_codec_context->ch_layout.order, 0);
+    av_opt_set_int(state->swr_context, "out_channel_layout", audio_codec_context->ch_layout.order,  0);
+    av_opt_set_int(state->swr_context, "in_sample_rate",     audio_codec_context->sample_rate, 0);
+    av_opt_set_int(state->swr_context, "out_sample_rate",    audio_codec_context->sample_rate, 0);
+    av_opt_set_sample_fmt(state->swr_context, "in_sample_fmt",  audio_codec_context->sample_fmt, 0);
+    av_opt_set_sample_fmt(state->swr_context, "out_sample_fmt", AV_SAMPLE_FMT_S16,  0);
+
+    if (swr_init(state->swr_context) < 0) {
+        printf("Couldn't initialize the SwrContext\n");
+        swr_free(&state->swr_context);
+        return false;
+    }
+    // Inicializar SwrContext
+    if (swr_init(state->swr_context) < 0) {
+        printf("Couldn't initialize SwrContext\n");
+        swr_free(&state->swr_context);
+        return false;
+    }
+
+    // Asignar memoria para frames y paquetes
+    av_frame = av_frame_alloc();
+    av_packet = av_packet_alloc();
+    if (!av_packet || !av_frame) {
+        printf("Couldn't allocate memory for AV frame or AV packet\n");
+        return false;
+    }
+
+    return true;
 }
 
 bool video_reader_read_frame(VideoReaderState* state, uint8_t* frame_buffer, int64_t* pts){
 	auto& width = state->width;
 	auto& height = state->height;
 	auto& format_context = state->format_context;
-	auto& codec_context = state->codec_context;
+	auto& video_codec_context = state->video_codec_context;
+	auto& audio_codec_context = state->audio_codec_context;
 	auto& av_frame = state->av_frame;
 	auto& av_packet = state->av_packet;
 	auto& sws_context = state->sws_context;
 	auto& video_stream_index = state->video_stream_index;
+	auto& audio_stream_index = state->audio_stream_index;
 	// decode one frame
 	int response;
 	while(av_read_frame(format_context, av_packet) >= 0){
@@ -89,14 +150,14 @@ bool video_reader_read_frame(VideoReaderState* state, uint8_t* frame_buffer, int
 			av_packet_unref(av_packet);
 			continue;
 		}
-		response = avcodec_send_packet(codec_context, av_packet);
+		response = avcodec_send_packet(video_codec_context, av_packet);
 		if(response < 0){
 				char errbuf[AV_ERROR_MAX_STRING_SIZE];
 				av_strerror(response, errbuf, sizeof(errbuf));
 				printf("failed to decode packet: %s\n", errbuf);
 				return false;
 		}
-		response = avcodec_receive_frame(codec_context, av_frame);
+		response = avcodec_receive_frame(video_codec_context, av_frame);
 		if(response == AVERROR(EAGAIN) || response == AVERROR_EOF){
 			av_packet_unref(av_packet);
 			continue;
@@ -115,7 +176,7 @@ bool video_reader_read_frame(VideoReaderState* state, uint8_t* frame_buffer, int
 	sws_context = sws_getContext(
 		width, //tamaño origen
 		height,
-		codec_context->pix_fmt,
+		video_codec_context->pix_fmt,
 		width, //tamaño destino
 		height,
 		AV_PIX_FMT_RGB0,
@@ -131,20 +192,86 @@ bool video_reader_read_frame(VideoReaderState* state, uint8_t* frame_buffer, int
 	int dest_linesize[4] = {av_frame->width * 4, 0, 0, 0};
 	sws_scale(sws_context, av_frame->data, av_frame->linesize, 0, av_frame->height, dest, dest_linesize);
 
-
-	//*width_out = av_frame->width;
-	//*height_out = av_frame->height;
-	//*data_out = data;
-
 	return true;
 }
 
+bool video_reader_read_audio(VideoReaderState* state, uint8_t** audio_data, int* audio_size) {
+    auto& format_context = state->format_context;
+    auto& audio_codec_context = state->audio_codec_context;
+    auto& av_frame = state->av_frame;
+    auto& av_packet = state->av_packet;
+    auto& swr_context = state->swr_context;
+    auto& audio_stream_index = state->audio_stream_index;
+
+    int response;
+
+    while (av_read_frame(format_context, av_packet) >= 0) {
+        if (av_packet->stream_index == audio_stream_index) {
+            response = avcodec_send_packet(audio_codec_context, av_packet);
+            if (response < 0) {
+                char errbuf[AV_ERROR_MAX_STRING_SIZE];
+                av_strerror(response, errbuf, sizeof(errbuf));
+                printf("Failed to decode audio packet: %s\n", errbuf);
+                return false;
+            }
+            response = avcodec_receive_frame(audio_codec_context, av_frame);
+            if (response == AVERROR(EAGAIN) || response == AVERROR_EOF) {
+                av_packet_unref(av_packet);
+                continue;
+            } else if (response < 0) {
+                char errbuf[AV_ERROR_MAX_STRING_SIZE];
+                av_strerror(response, errbuf, sizeof(errbuf));
+                printf("Failed to decode audio frame: %s\n", errbuf);
+                return false;
+            }
+
+            int dst_nb_samples = av_rescale_rnd(
+                swr_get_delay(swr_context, audio_codec_context->sample_rate) + av_frame->nb_samples,
+                audio_codec_context->sample_rate, audio_codec_context->sample_rate, AV_ROUND_UP);
+
+            int data_size = av_samples_get_buffer_size(
+                nullptr, av_frame->ch_layout.nb_channels, dst_nb_samples,
+                AV_SAMPLE_FMT_S16, 1
+            );
+
+            *audio_data = new uint8_t[data_size];
+
+            if (swr_context) {
+                int converted_samples = swr_convert(
+                    swr_context,
+                    audio_data,
+                    dst_nb_samples,
+                    (const uint8_t**)av_frame->data,
+                    av_frame->nb_samples
+                );
+                if (converted_samples < 0) {
+                    printf("Error al convertir el audio\n");
+                    return false;
+                }
+            } else {
+                memcpy(*audio_data, av_frame->data[0], data_size);
+            }
+
+            *audio_size = data_size;
+            av_packet_unref(av_packet);
+            return true;
+        } else {
+            av_packet_unref(av_packet);
+        }
+    }
+
+    return false;
+}
+
+
 void video_reader_close(VideoReaderState* state){
 	//Clean codec and format context
-	sws_freeContext(state->sws_context);
-	avformat_close_input(&state->format_context);
-	avformat_free_context(state->format_context);
-	av_frame_free(&state->av_frame);
-	av_packet_free(&state->av_packet);
-	avcodec_free_context(&state->codec_context);
+    sws_freeContext(state->sws_context);
+    swr_free(&state->swr_context);
+    avformat_close_input(&state->format_context);
+    avformat_free_context(state->format_context);
+    av_frame_free(&state->av_frame);
+    av_packet_free(&state->av_packet);
+    avcodec_free_context(&state->video_codec_context);
+    avcodec_free_context(&state->audio_codec_context);
 }

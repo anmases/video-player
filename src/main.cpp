@@ -6,7 +6,7 @@
 
 int main(int argc, const char** argv) {
     // Inicializar SDL
-    if (SDL_Init(SDL_INIT_VIDEO) == SDL_FALSE) {
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) == SDL_FALSE) {
         printf("Couldn't initialize SDL: %s\n", SDL_GetError());
         return 1;
     }
@@ -58,9 +58,40 @@ int main(int argc, const char** argv) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
 
+    // Configuración del audio con SDL3
+    SDL_AudioSpec spec = {
+        .format = SDL_AUDIO_S16,
+        .channels = vr_state.audio_codec_context->ch_layout.nb_channels,
+        .freq = vr_state.audio_codec_context->sample_rate
+    };
+
+    SDL_AudioStream* audio_stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
+    if (!audio_stream) {
+        printf("Failed to open audio stream: %s\n", SDL_GetError());
+        video_reader_close(&vr_state);
+        SDL_DestroyWindow(window);
+        SDL_Quit();
+        return 1;
+    }
+
+    SDL_ResumeAudioDevice(SDL_GetAudioStreamDevice(audio_stream));
+
+    // Comprobar el estado del dispositivo de audio
+    if (SDL_GetAudioStreamAvailable(audio_stream) < 0) {
+        printf("Error: No audio available on stream: %s\n", SDL_GetError());
+        SDL_DestroyAudioStream(audio_stream);
+        video_reader_close(&vr_state);
+        SDL_DestroyWindow(window);
+        SDL_Quit();
+        return 1;
+    }
+
     // Variables para el tiempo de reproducción usando std::chrono
     using Clock = std::chrono::high_resolution_clock;
     Clock::time_point start_time = Clock::now();
+
+    uint8_t* audio_data = nullptr;
+    int audio_size = 0;
 
     // Bucle principal de la aplicación
     bool running = true;
@@ -73,19 +104,7 @@ int main(int argc, const char** argv) {
             }
         }
 
-        // Limpiar el buffer de color y profundidad
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-        // Configuración de la proyección ortogonal
-        int window_width, window_height;
-        SDL_GetWindowSize(window, &window_width, &window_height);
-        glViewport(0, 0, window_width, window_height);
-        glMatrixMode(GL_PROJECTION);
-        glLoadIdentity();
-        glOrtho(0, window_width, window_height, 0, -1, 1);
-        glMatrixMode(GL_MODELVIEW);
-
-        // Leer el frame y cargarlo en la textura
+        // Leer el frame de video y sincronizar con el tiempo de reproducción
         int64_t pts;
         if (!video_reader_read_frame(&vr_state, frame_data, &pts)) {
             printf("Couldn't load video frame\n");
@@ -96,16 +115,37 @@ int main(int argc, const char** argv) {
         std::chrono::duration<double> elapsed_seconds = current_time - start_time;
         double pt_seconds = pts * (double)vr_state.time_base.num / (double)vr_state.time_base.den;
 
+        // Leer y reproducir el audio cuando esté sincronizado
+        if (pt_seconds <= elapsed_seconds.count()) {
+            if (video_reader_read_audio(&vr_state, &audio_data, &audio_size)) {
+                SDL_PutAudioStreamData(audio_stream, audio_data, audio_size);
+
+                // Verificar si se ha puesto el audio correctamente
+                if (SDL_GetError()[0] != '\0') {
+                    printf("Error while putting audio data: %s\n", SDL_GetError());
+                }
+                delete[] audio_data;
+            }
+        }
+
+        // Asegurar sincronización de audio y video
         while (pt_seconds > elapsed_seconds.count()) {
             SDL_Delay(1);
             current_time = Clock::now();
             elapsed_seconds = current_time - start_time;
         }
 
+        // Renderizar el frame de video
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        glViewport(0, 0, frame_width, frame_height);
+        glMatrixMode(GL_PROJECTION);
+        glLoadIdentity();
+        glOrtho(0, frame_width, frame_height, 0, -1, 1);
+        glMatrixMode(GL_MODELVIEW);
+        
         glBindTexture(GL_TEXTURE_2D, tex_handle);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, frame_width, frame_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, frame_data);
 
-        // Renderizar la textura
         glEnable(GL_TEXTURE_2D);
         glBindTexture(GL_TEXTURE_2D, tex_handle);
         glBegin(GL_QUADS);
@@ -121,6 +161,7 @@ int main(int argc, const char** argv) {
     }
 
     // Limpiar recursos
+    SDL_DestroyAudioStream(audio_stream);
     video_reader_close(&vr_state);
     SDL_DestroyWindow(window);
     SDL_Quit();
