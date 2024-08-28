@@ -1,0 +1,35 @@
+{
+	"version": "0.2.0",
+	"configurations": [
+			{
+					"name": "(gdb) Launch",
+					"type": "cppdbg",
+					"request": "launch",
+					"program": "${workspaceFolder}/build/video-player.exe",
+					"args": [],
+					"stopAtEntry": true, // Detente en la primera línea de main
+					"cwd": "${workspaceFolder}/build",
+					"environment": [],
+					"externalConsole": true, // Prueba usando una consola externa
+					"MIMode": "gdb",
+					"miDebuggerPath": "C:/Users/antonio/Development/TDM-GCC/bin/gdb.exe",
+					"setupCommands": [
+    {
+        "description": "Enable pretty-printing for gdb",
+        "text": "-enable-pretty-printing",
+        "ignoreFailures": true
+    },
+    {
+        "text": "info breakpoints",
+        "ignoreFailures": false
+    }
+],
+					"logging": {
+							"engineLogging": false,
+							"trace": false,
+							"traceResponse": false
+					},
+					"targetArchitecture": "x86_64"
+			}
+	]
+}

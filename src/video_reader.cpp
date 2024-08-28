@@ -94,32 +94,64 @@ bool video_reader_open(VideoReaderState* state, const char* filename) {
         return false;
     }
 
-		// Inicializar SwrContext para la conversión de formato de audio
-    state->swr_context = swr_alloc();
-    if (!state->swr_context) {
-        printf("Couldn't allocate SwrContext\n");
-        return false;
-    }
+	// Inicializar SwrContext para la conversión de formato de audio
+state->swr_context = swr_alloc();
+if (!state->swr_context) {
+    printf("Couldn't allocate SwrContext\n");
+    return false;
+}
+// Configurar el SwrContext
+AVChannelLayout in_ch_layout = audio_codec_context->ch_layout;
+AVChannelLayout out_ch_layout;
+av_channel_layout_default(&out_ch_layout, 2);  // Salida en estéreo
+int ret = av_opt_set_chlayout(state->swr_context, "in_chlayout", &in_ch_layout, 0);
+if (ret < 0) {
+    char errbuf[AV_ERROR_MAX_STRING_SIZE];
+    av_make_error_string(errbuf, AV_ERROR_MAX_STRING_SIZE, ret);
+    printf("Error setting input channel layout: %s\n", errbuf);
+    return false;
+}
+ret = av_opt_set_chlayout(state->swr_context, "out_chlayout", &out_ch_layout, 0);
+if (ret < 0) {
+    char errbuf[AV_ERROR_MAX_STRING_SIZE];
+    av_make_error_string(errbuf, AV_ERROR_MAX_STRING_SIZE, ret);
+    printf("Error setting output channel layout: %s\n", errbuf);
+    return false;
+}
+ret = av_opt_set_int(state->swr_context, "in_sample_rate", audio_codec_context->sample_rate, 0);
+if (ret < 0) {
+    char errbuf[AV_ERROR_MAX_STRING_SIZE];
+    av_make_error_string(errbuf, AV_ERROR_MAX_STRING_SIZE, ret);
+    printf("Error setting input sample rate: %s\n", errbuf);
+    return false;
+}
+ret = av_opt_set_int(state->swr_context, "out_sample_rate", audio_codec_context->sample_rate, 0);
+if (ret < 0) {
+    char errbuf[AV_ERROR_MAX_STRING_SIZE];
+    av_make_error_string(errbuf, AV_ERROR_MAX_STRING_SIZE, ret);
+    printf("Error setting output sample rate: %s\n", errbuf);
+    return false;
+}
+ret = av_opt_set_sample_fmt(state->swr_context, "in_sample_fmt", audio_codec_context->sample_fmt, 0);
+if (ret < 0) {
+    char errbuf[AV_ERROR_MAX_STRING_SIZE];
+    av_make_error_string(errbuf, AV_ERROR_MAX_STRING_SIZE, ret);
+    printf("Error setting input sample format: %s\n", errbuf);
+    return false;
+}
+ret = av_opt_set_sample_fmt(state->swr_context, "out_sample_fmt", AV_SAMPLE_FMT_S16, 0);
+if (ret < 0) {
+    char errbuf[AV_ERROR_MAX_STRING_SIZE];
+    av_make_error_string(errbuf, AV_ERROR_MAX_STRING_SIZE, ret);
+    printf("Error setting output sample format: %s\n", errbuf);
+    return false;
+}
+if (swr_init(state->swr_context) < 0) {
+    printf("Couldn't initialize the SwrContext\n");
+    swr_free(&state->swr_context);
+    return false;
+}
 
-	// Configurar SwrContext
-    av_opt_set_int(state->swr_context, "in_channel_layout",  audio_codec_context->ch_layout.order, 0);
-    av_opt_set_int(state->swr_context, "out_channel_layout", audio_codec_context->ch_layout.order,  0);
-    av_opt_set_int(state->swr_context, "in_sample_rate",     audio_codec_context->sample_rate, 0);
-    av_opt_set_int(state->swr_context, "out_sample_rate",    audio_codec_context->sample_rate, 0);
-    av_opt_set_sample_fmt(state->swr_context, "in_sample_fmt",  audio_codec_context->sample_fmt, 0);
-    av_opt_set_sample_fmt(state->swr_context, "out_sample_fmt", AV_SAMPLE_FMT_S16,  0);
-
-    if (swr_init(state->swr_context) < 0) {
-        printf("Couldn't initialize the SwrContext\n");
-        swr_free(&state->swr_context);
-        return false;
-    }
-    // Inicializar SwrContext
-    if (swr_init(state->swr_context) < 0) {
-        printf("Couldn't initialize SwrContext\n");
-        swr_free(&state->swr_context);
-        return false;
-    }
 
     // Asignar memoria para frames y paquetes
     av_frame = av_frame_alloc();
@@ -225,16 +257,18 @@ bool video_reader_read_audio(VideoReaderState* state, uint8_t** audio_data, int*
                 return false;
             }
 
-            int dst_nb_samples = av_rescale_rnd(
-                swr_get_delay(swr_context, audio_codec_context->sample_rate) + av_frame->nb_samples,
-                audio_codec_context->sample_rate, audio_codec_context->sample_rate, AV_ROUND_UP);
+          const int BUFFER_MULTIPLIER = 1;  // Puedes ajustar este multiplicador
+					int dst_nb_samples = av_rescale_rnd(
+							swr_get_delay(swr_context, audio_codec_context->sample_rate) + av_frame->nb_samples,
+							audio_codec_context->sample_rate, audio_codec_context->sample_rate, AV_ROUND_UP
+					);
 
-            int data_size = av_samples_get_buffer_size(
-                nullptr, av_frame->ch_layout.nb_channels, dst_nb_samples,
-                AV_SAMPLE_FMT_S16, 1
-            );
+					int data_size = av_samples_get_buffer_size(
+							nullptr, av_frame->ch_layout.nb_channels, dst_nb_samples * BUFFER_MULTIPLIER,
+							AV_SAMPLE_FMT_S16, 1
+					);
 
-            *audio_data = new uint8_t[data_size];
+					*audio_data = new uint8_t[data_size];
 
             if (swr_context) {
                 int converted_samples = swr_convert(

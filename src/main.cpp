@@ -76,16 +76,6 @@ int main(int argc, const char** argv) {
 
     SDL_ResumeAudioDevice(SDL_GetAudioStreamDevice(audio_stream));
 
-    // Comprobar el estado del dispositivo de audio
-    if (SDL_GetAudioStreamAvailable(audio_stream) < 0) {
-        printf("Error: No audio available on stream: %s\n", SDL_GetError());
-        SDL_DestroyAudioStream(audio_stream);
-        video_reader_close(&vr_state);
-        SDL_DestroyWindow(window);
-        SDL_Quit();
-        return 1;
-    }
-
     // Variables para el tiempo de reproducción usando std::chrono
     using Clock = std::chrono::high_resolution_clock;
     Clock::time_point start_time = Clock::now();
@@ -106,58 +96,49 @@ int main(int argc, const char** argv) {
 
         // Leer el frame de video y sincronizar con el tiempo de reproducción
         int64_t pts;
-        if (!video_reader_read_frame(&vr_state, frame_data, &pts)) {
-            printf("Couldn't load video frame\n");
-            break;
-        }
+        if (video_reader_read_frame(&vr_state, frame_data, &pts)) {
+            double pt_seconds = pts * (double)vr_state.time_base.num / (double)vr_state.time_base.den;
 
-        Clock::time_point current_time = Clock::now();
-        std::chrono::duration<double> elapsed_seconds = current_time - start_time;
-        double pt_seconds = pts * (double)vr_state.time_base.num / (double)vr_state.time_base.den;
+            // Sincronizar con el tiempo de reproducción
+            Clock::time_point current_time = Clock::now();
+            std::chrono::duration<double> elapsed_seconds = current_time - start_time;
+
+            while (pt_seconds > elapsed_seconds.count()) {
+                SDL_Delay(1);
+                current_time = Clock::now();
+                elapsed_seconds = current_time - start_time;
+            }
+
+            // Renderizar el frame de video
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+            glViewport(0, 0, frame_width, frame_height);
+            glMatrixMode(GL_PROJECTION);
+            glLoadIdentity();
+            glOrtho(0, frame_width, frame_height, 0, -1, 1);
+            glMatrixMode(GL_MODELVIEW);
+
+            glBindTexture(GL_TEXTURE_2D, tex_handle);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, frame_width, frame_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, frame_data);
+
+            glEnable(GL_TEXTURE_2D);
+            glBindTexture(GL_TEXTURE_2D, tex_handle);
+            glBegin(GL_QUADS);
+                glTexCoord2d(0, 0); glVertex2i(0, 0);
+                glTexCoord2d(1, 0); glVertex2i(frame_width, 0);
+                glTexCoord2d(1, 1); glVertex2i(frame_width, frame_height);
+                glTexCoord2d(0, 1); glVertex2i(0, frame_height);
+            glEnd();
+            glDisable(GL_TEXTURE_2D);
+            SDL_GL_SwapWindow(window);
+        }
 
         // Leer y reproducir el audio cuando esté sincronizado
-        if (pt_seconds <= elapsed_seconds.count()) {
-            if (video_reader_read_audio(&vr_state, &audio_data, &audio_size)) {
-                SDL_PutAudioStreamData(audio_stream, audio_data, audio_size);
-
-                // Verificar si se ha puesto el audio correctamente
-                if (SDL_GetError()[0] != '\0') {
-                    printf("Error while putting audio data: %s\n", SDL_GetError());
-                }
-                delete[] audio_data;
+        if (video_reader_read_audio(&vr_state, &audio_data, &audio_size)) {
+            if (SDL_PutAudioStreamData(audio_stream, audio_data, audio_size) < 0) {
+                printf("Error while putting audio data: %s\n", SDL_GetError());
             }
+            delete[] audio_data;
         }
-
-        // Asegurar sincronización de audio y video
-        while (pt_seconds > elapsed_seconds.count()) {
-            SDL_Delay(1);
-            current_time = Clock::now();
-            elapsed_seconds = current_time - start_time;
-        }
-
-        // Renderizar el frame de video
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        glViewport(0, 0, frame_width, frame_height);
-        glMatrixMode(GL_PROJECTION);
-        glLoadIdentity();
-        glOrtho(0, frame_width, frame_height, 0, -1, 1);
-        glMatrixMode(GL_MODELVIEW);
-        
-        glBindTexture(GL_TEXTURE_2D, tex_handle);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, frame_width, frame_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, frame_data);
-
-        glEnable(GL_TEXTURE_2D);
-        glBindTexture(GL_TEXTURE_2D, tex_handle);
-        glBegin(GL_QUADS);
-            glTexCoord2d(0, 0); glVertex2i(0, 0);
-            glTexCoord2d(1, 0); glVertex2i(frame_width, 0);
-            glTexCoord2d(1, 1); glVertex2i(frame_width, frame_height);
-            glTexCoord2d(0, 1); glVertex2i(0, frame_height);
-        glEnd();
-        glDisable(GL_TEXTURE_2D);
-
-        // Intercambiar los buffers
-        SDL_GL_SwapWindow(window);
     }
 
     // Limpiar recursos
