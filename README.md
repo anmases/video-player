@@ -30,7 +30,7 @@ make
 ## Run
 Run video-player.exe in build directory.
 
-## debug
+## debug mode
 In build directory
 ```bash
 cmake -G "MinGW Makefiles" .. -DCMAKE_TOOLCHAIN_FILE="C:/Users/antonio/Development/vcpkg/scripts/buildsystems/vcpkg.cmake" -DCMAKE_BUILD_TYPE=Debug
