@@ -1,7 +1,8 @@
 {
 	"files.associations": {
 		"ostream": "cpp",
-		"xlocale": "cpp"
+		"xlocale": "cpp",
+		"new": "cpp"
 	},
 	"cmake.configureOnOpen": false
 }
