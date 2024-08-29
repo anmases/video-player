@@ -3,6 +3,55 @@
 #include <iostream>
 #include "video_reader.hpp"
 #include <GL/gl.h>
+#include <thread>
+#include <atomic>
+#include <mutex>
+#include <condition_variable>
+
+// Estructura para compartir datos de video entre hilos
+struct VideoBuffer {
+    uint8_t* frame_data;
+    bool frame_ready = false;
+    std::mutex mtx;
+    std::condition_variable cv;
+};
+
+// Función para manejar la reproducción de video
+void video_thread(VideoReaderState* vr_state, VideoBuffer* video_buffer, std::atomic<bool>& running) {
+    int64_t video_pts = 0;
+    int frame_width = vr_state->width;
+    int frame_height = vr_state->height;
+    uint8_t* frame_data = new uint8_t[frame_width * frame_height * 4];
+
+    while (running) {
+        if (video_reader_read_frame(vr_state, frame_data, &video_pts)) {
+            {
+                std::lock_guard<std::mutex> lock(video_buffer->mtx);
+                std::copy(frame_data, frame_data + (frame_width * frame_height * 4), video_buffer->frame_data);
+                video_buffer->frame_ready = true;
+            }
+            video_buffer->cv.notify_one();
+        }
+    }
+
+    delete[] frame_data;
+}
+
+// Función para manejar la reproducción de audio
+void audio_thread(VideoReaderState* vr_state, SDL_AudioStream* audio_stream, std::atomic<bool>& running) {
+    uint8_t* audio_data = nullptr;
+    int audio_size = 0;
+    int64_t audio_pts = 0;
+
+    while (running) {
+        if (video_reader_read_audio(vr_state, &audio_data, &audio_size, &audio_pts)) {
+            if (SDL_PutAudioStreamData(audio_stream, audio_data, audio_size) < 0) {
+                printf("Error while putting audio data: %s\n", SDL_GetError());
+            }
+            delete[] audio_data;
+        }
+    }
+}
 
 int main(int argc, const char** argv) {
     // Inicializar SDL
@@ -44,6 +93,10 @@ int main(int argc, const char** argv) {
     const int frame_height = vr_state.height;
     uint8_t* frame_data = new uint8_t[frame_width * frame_height * 4];
 
+    // Búfer de video compartido entre hilos
+    VideoBuffer video_buffer;
+    video_buffer.frame_data = frame_data;
+
     // Actualizar el tamaño de la ventana a las dimensiones del frame
     SDL_SetWindowSize(window, frame_width, frame_height);
 
@@ -76,70 +129,54 @@ int main(int argc, const char** argv) {
 
     SDL_ResumeAudioDevice(SDL_GetAudioStreamDevice(audio_stream));
 
-    // Variables para el tiempo de reproducción usando std::chrono
-    using Clock = std::chrono::high_resolution_clock;
-    Clock::time_point start_time = Clock::now();
+    std::atomic<bool> running(true);
 
-    uint8_t* audio_data = nullptr;
-    int audio_size = 0;
+    // Crear hilos para video y audio
+    std::thread videoThread(video_thread, &vr_state, &video_buffer, std::ref(running));
+    std::thread audioThread(audio_thread, &vr_state, audio_stream, std::ref(running));
 
-    // Bucle principal de la aplicación
-    bool running = true;
+    // Manejo de eventos y renderizado en el hilo principal
     SDL_Event event;
     while (running) {
-        // Manejar eventos SDL
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_EVENT_QUIT) {
                 running = false;
             }
         }
 
-        // Leer el frame de video y sincronizar con el tiempo de reproducción
-        int64_t pts;
-        if (video_reader_read_frame(&vr_state, frame_data, &pts)) {
-            double pt_seconds = pts * (double)vr_state.time_base.num / (double)vr_state.time_base.den;
-
-            // Sincronizar con el tiempo de reproducción
-            Clock::time_point current_time = Clock::now();
-            std::chrono::duration<double> elapsed_seconds = current_time - start_time;
-
-            while (pt_seconds > elapsed_seconds.count()) {
-                SDL_Delay(1);
-                current_time = Clock::now();
-                elapsed_seconds = current_time - start_time;
-            }
-
-            // Renderizar el frame de video
-            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-            glViewport(0, 0, frame_width, frame_height);
-            glMatrixMode(GL_PROJECTION);
-            glLoadIdentity();
-            glOrtho(0, frame_width, frame_height, 0, -1, 1);
-            glMatrixMode(GL_MODELVIEW);
-
-            glBindTexture(GL_TEXTURE_2D, tex_handle);
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, frame_width, frame_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, frame_data);
-
-            glEnable(GL_TEXTURE_2D);
-            glBindTexture(GL_TEXTURE_2D, tex_handle);
-            glBegin(GL_QUADS);
-                glTexCoord2d(0, 0); glVertex2i(0, 0);
-                glTexCoord2d(1, 0); glVertex2i(frame_width, 0);
-                glTexCoord2d(1, 1); glVertex2i(frame_width, frame_height);
-                glTexCoord2d(0, 1); glVertex2i(0, frame_height);
-            glEnd();
-            glDisable(GL_TEXTURE_2D);
-            SDL_GL_SwapWindow(window);
+        // Renderizar el frame de video si está listo
+        {
+            std::unique_lock<std::mutex> lock(video_buffer.mtx);
+            video_buffer.cv.wait(lock, [&video_buffer] { return video_buffer.frame_ready; });
+            video_buffer.frame_ready = false;
         }
 
-        // Leer y reproducir el audio cuando esté sincronizado
-        if (video_reader_read_audio(&vr_state, &audio_data, &audio_size)) {
-            if (SDL_PutAudioStreamData(audio_stream, audio_data, audio_size) < 0) {
-                printf("Error while putting audio data: %s\n", SDL_GetError());
-            }
-            delete[] audio_data;
-        }
+        // Renderizar el frame de video
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        glViewport(0, 0, frame_width, frame_height);
+        glMatrixMode(GL_PROJECTION);
+        glLoadIdentity();
+        glOrtho(0, frame_width, frame_height, 0, -1, 1);
+        glMatrixMode(GL_MODELVIEW);
+
+        glBindTexture(GL_TEXTURE_2D, tex_handle);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, frame_width, frame_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, frame_data);
+
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, tex_handle);
+        glBegin(GL_QUADS);
+            glTexCoord2d(0, 0); glVertex2i(0, 0);
+            glTexCoord2d(1, 0); glVertex2i(frame_width, 0);
+            glTexCoord2d(1, 1); glVertex2i(frame_width, frame_height);
+            glTexCoord2d(0, 1); glVertex2i(0, frame_height);
+        glEnd();
+        glDisable(GL_TEXTURE_2D);
+        SDL_GL_SwapWindow(window);
     }
+
+    // Esperar a que los hilos terminen
+    videoThread.join();
+    audioThread.join();
 
     // Limpiar recursos
     SDL_DestroyAudioStream(audio_stream);
