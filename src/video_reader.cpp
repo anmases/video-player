@@ -195,14 +195,15 @@ void decode_video_packet(VideoState* state, AVPacket* packet, VideoFrame& vf) {
         vf.pts = frame->pts;
 
         // Calcular el tamaño de la imagen
-        int num_bytes = frame->width * frame->height * 4;
+        unsigned int num_bytes = vf.width * vf.height * 4;
         vf.data = new uint8_t[num_bytes];
 
         uint8_t* dest[4] = { vf.data, nullptr, nullptr, nullptr };
         int dest_linesize[4] = { frame->width * 4, 0, 0, 0 };
 
         // Inicializar o reutilizar el sws_context si no está inicializado
-        if (!state->sws_context || state->sws_context != 0) {
+        if (!state->sws_context || state->sws_context == 0) {
+						printf("initialize scaler");
             state->sws_context = sws_getContext(
                 frame->width,
                 frame->height,

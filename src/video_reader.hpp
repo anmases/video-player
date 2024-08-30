@@ -19,14 +19,14 @@ extern "C" {
 }
 
 struct VideoFrame {
-    uint8_t* data;
+    uint8_t* data = nullptr;
     int width;
     int height;
     double pts;
 };
 
 struct AudioData {
-    uint8_t* data;
+    uint8_t* data = nullptr;
     int size;
     double pts;
 };
@@ -73,6 +73,11 @@ public:
     void clear() {
         std::lock_guard<std::mutex> lock(mtx);
         while (!q.empty()) q.pop();
+    }
+
+		size_t size() const {
+			std::lock_guard<std::mutex> lock(mtx);
+			return q.size();
     }
 
 private:
