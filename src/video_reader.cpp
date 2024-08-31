@@ -191,9 +191,10 @@ void decode_video_packet(VideoState* state, AVPacket* packet, VideoFrame& vf) {
     }
     response = avcodec_receive_frame(state->video_codec_context, frame);
     if (response >= 0) {
+				double valid_pts = (frame->pts != AV_NOPTS_VALUE) ? frame->pts : frame -> best_effort_timestamp;
         vf.width = frame->width;
         vf.height = frame->height;
-        vf.pts = frame->pts;
+        vf.pts = valid_pts;
 
         // Calcular el tamaño de la imagen
         unsigned int num_bytes = vf.width * vf.height * 4;
@@ -254,10 +255,11 @@ void decode_audio_packet(VideoState* state, AVPacket* packet, AudioData& ad) {
             state->audio_codec_context->sample_rate,
             AV_ROUND_UP
         );
+				double valid_pts = (frame->pts != AV_NOPTS_VALUE) ? frame->pts : frame -> best_effort_timestamp;
         int data_size = av_samples_get_buffer_size(nullptr, state->audio_codec_context->ch_layout.nb_channels, dst_nb_samples, AV_SAMPLE_FMT_S16, 1);
         ad.data = new uint8_t[data_size];
         ad.size = data_size;
-        ad.pts = frame->pts * av_q2d(state->audio_codec_context->time_base);
+        ad.pts = valid_pts * av_q2d(state->audio_codec_context->time_base);
         uint8_t* out[] = { ad.data };
         swr_convert(state->swr_context, out, dst_nb_samples, (const uint8_t**)frame->data, frame->nb_samples);
     }
