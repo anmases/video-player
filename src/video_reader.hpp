@@ -2,6 +2,7 @@
 #define video_reader_hpp
 
 #include <condition_variable>
+#include <iostream>
 #include <mutex>
 #include <queue>
 #include <thread>
@@ -18,6 +19,8 @@ extern "C" {
     #include <SDL3/SDL.h>
 }
 
+using namespace std;
+
 struct VideoFrame {
     uint8_t* data = nullptr;
     int width;
@@ -33,18 +36,24 @@ struct AudioData {
 
 template <typename T>
 class SafeQueue {
+private:
+    std::queue<T> q;
+    mutable std::mutex mtx;
+    std::condition_variable cv;
+    size_t maxSize;
+		
 public:
     SafeQueue(size_t maxSize) : maxSize(maxSize) {}
 
     void enqueue(const T& item) {
-        std::unique_lock<std::mutex> lock(mtx);
+        unique_lock<mutex> lock(mtx);
         cv.wait(lock, [this] { return q.size() < maxSize; });
         q.push(item);
         cv.notify_one();
     }
 
     bool dequeue(T& item) {
-        std::unique_lock<std::mutex> lock(mtx);
+        unique_lock<mutex> lock(mtx);
         if (q.empty()) return false;
         item = q.front();
         q.pop();
@@ -53,38 +62,32 @@ public:
     }
 
     void wait_dequeue(T& item) {
-        std::unique_lock<std::mutex> lock(mtx);
+        unique_lock<mutex> lock(mtx);
         cv.wait(lock, [this] { return !q.empty(); });
         item = q.front();
         q.pop();
         cv.notify_one();
     }
 
-    bool empty() {  // Eliminar const
-        std::lock_guard<std::mutex> lock(mtx);
+    bool empty() {
+        lock_guard<mutex> lock(mtx);
         return q.empty();
     }
 
-    bool full() {  // Eliminar const
-        std::lock_guard<std::mutex> lock(mtx);
+    bool full() {
+        lock_guard<mutex> lock(mtx);
         return q.size() >= maxSize;
     }
 
     void clear() {
-        std::lock_guard<std::mutex> lock(mtx);
+        lock_guard<mutex> lock(mtx);
         while (!q.empty()) q.pop();
     }
 
 		size_t size() const {
-			std::lock_guard<std::mutex> lock(mtx);
+			lock_guard<mutex> lock(mtx);
 			return q.size();
     }
-
-private:
-    std::queue<T> q;
-    mutable std::mutex mtx;
-    std::condition_variable cv;
-    size_t maxSize;
 };
 
 
@@ -113,10 +116,10 @@ struct VideoState {
     SafeQueue<VideoFrame> video_queue;
     SafeQueue<AudioData> audio_queue;
 
-    std::atomic<bool> quit;
-    std::thread* decode_thread = nullptr;
-    std::thread* video_thread = nullptr;
-    std::thread* audio_thread = nullptr;
+    atomic<bool> quit;
+    thread* decode_thread = nullptr;
+    thread* video_thread = nullptr;
+    thread* audio_thread = nullptr;
 
     GLuint texture;
 

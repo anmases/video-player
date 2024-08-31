@@ -7,7 +7,9 @@
 #include <atomic>
 #include <mutex>
 
-std::mutex render_mutex;
+using namespace std;
+
+mutex render_mutex;
 
 void decode_thread(VideoState* state) {
     AVPacket* packet = av_packet_alloc();
@@ -16,8 +18,41 @@ void decode_thread(VideoState* state) {
 		AudioData ad;
 		double packet_dts;
 
+/*const size_t pre_buffering_threshold = 100; // Umbral de pre-buffering
+const size_t buffer_safety_margin = 10;
+
+		// Pre-buffering: Espera hasta que las colas tengan suficientes datos
+while ((state->video_queue.size() < pre_buffering_threshold || state->audio_queue.size() < pre_buffering_threshold) &&
+       !state->quit) {
+
+    if (av_read_frame(state->format_context, packet) < 0) {
+        end_of_stream = true;
+        break;
+    }
+
+    if (packet->stream_index == state->video_stream_index && 
+        state->video_queue.size() < pre_buffering_threshold + buffer_safety_margin) {
+        
+        decode_video_packet(state, packet, vf);
+        if (vf.data != nullptr) {
+            state->video_queue.enqueue(vf);
+            cout << "Video frame enqueued (pre-buffering), PTS: " << vf.pts << endl;
+        }
+    } 
+    else if (packet->stream_index == state->audio_stream_index && 
+             state->audio_queue.size() < pre_buffering_threshold + buffer_safety_margin) {
+        
+        decode_audio_packet(state, packet, ad);
+        if (ad.data != nullptr) {
+            state->audio_queue.enqueue(ad);
+            cout << "Audio data enqueued (pre-buffering), PTS: " << ad.pts << endl;
+        }
+    }
+    av_packet_unref(packet);
+}
+*/
     // Tiempo de inicio
-    using Clock = std::chrono::high_resolution_clock;
+    using Clock = chrono::high_resolution_clock;
     Clock::time_point start_time = Clock::now();
 
     while (!state->quit) {
@@ -30,7 +65,7 @@ void decode_thread(VideoState* state) {
                 state->quit = true;
                 break;
             } else {
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                this_thread::sleep_for(chrono::milliseconds(10));
                 continue;
             }
         }
@@ -41,11 +76,11 @@ void decode_thread(VideoState* state) {
 
             // Tiempo actual de reproducción
             Clock::time_point current_time = Clock::now();
-            std::chrono::duration<double> elapsed_seconds = current_time - start_time;
+            chrono::duration<double> elapsed_seconds = current_time - start_time;
 
             // Esperar hasta que sea el momento adecuado para decodificar este paquete
             while (packet_dts > elapsed_seconds.count()) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                this_thread::sleep_for(chrono::milliseconds(0));
                 current_time = Clock::now();
                 elapsed_seconds = current_time - start_time;
             }
@@ -55,17 +90,17 @@ void decode_thread(VideoState* state) {
             decode_video_packet(state, packet, vf);
             if (vf.data != nullptr) {
                 state->video_queue.enqueue(vf);
-                std::cout << "Video frame enqueued, PTS: " << vf.pts << std::endl;
+                cout << "Video frame enqueued, PTS: " << vf.pts << endl;
             }
         } else if (packet->stream_index == state->audio_stream_index && !state->audio_queue.full()) {
             decode_audio_packet(state, packet, ad);
             if (ad.data != nullptr) {
                 state->audio_queue.enqueue(ad);
-                std::cout << "Audio data enqueued, PTS: " << ad.pts << std::endl;
+                cout << "Audio data enqueued, PTS: " << ad.pts << endl;
             }
-        }
-
-        av_packet_unref(packet);
+        } else {
+					av_packet_unref(packet);
+				}      
     }
     av_packet_free(&packet);
 }
@@ -77,26 +112,32 @@ void audio_thread(VideoState* state, SDL_AudioStream* audio_stream) {
     while (!state->quit || !state->audio_queue.empty()) {
         if (state->audio_queue.dequeue(ad)) {
             double audio_pts = ad.pts;
-
-            std::lock_guard<std::mutex> lock(render_mutex);
-            if (SDL_PutAudioStreamData(audio_stream, ad.data, ad.size) < 0) {
-                printf("Error while putting audio data: %s\n", SDL_GetError());
+            if (SDL_PutAudioStreamData(audio_stream, ad.data, ad.size) == SDL_FALSE) {
+              cout << "Error while putting audio data: " << SDL_GetError() << endl;
             }
             state->audio_clock = audio_pts;
             delete[] ad.data;
-            //std::cout << "Audio data played, PTS: " << audio_pts << std::endl;
+            cout << "Audio chunk played, PTS: " << audio_pts << endl;
+
+						 // Mantener el tamaño del buffer dentro de un rango saludable
+           /* int buffered_bytes = SDL_GetAudioStreamAvailable(audio_stream);
+            int target_buffer_size = state->audio_codec_context->frame_size * 10; // Ajusta este valor según sea necesario
+            if (buffered_bytes < target_buffer_size) {
+                this_thread::sleep_for(chrono::milliseconds(2));
+            } else if (buffered_bytes > target_buffer_size * 2) {
+                this_thread::sleep_for(chrono::milliseconds(5));  // Incrementa el delay si el buffer está demasiado lleno
+            }*/
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(10)); // Pequeña espera para evitar uso excesivo de CPU
     }
 }
 
 void monitor_queue_sizes(VideoState* state) {
     while (!state->quit) {
-        std::cout << "Tamaño de la cola de video: " << state->video_queue.size() << std::endl;
-        std::cout << "Tamaño de la cola de audio: " << state->audio_queue.size() << std::endl;
+        cout << "Tamaño de la cola de video: " << state->video_queue.size() << endl;
+        cout << "Tamaño de la cola de audio: " << state->audio_queue.size() << endl;
 
         // Pausar brevemente antes de la siguiente medición
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+        this_thread::sleep_for(chrono::seconds(10));
     }
 }
 
@@ -106,14 +147,14 @@ int main(int argc, const char** argv) {
 
     // Inicializar SDL
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) == SDL_FALSE) {
-        printf("Couldn't initialize SDL: %s\n", SDL_GetError());
+        cout << "Couldn't initialize SDL: " << SDL_GetError() << endl;
         return 1;
     }
 
     // Crear una ventana SDL con contexto OpenGL
     state.window = SDL_CreateWindow("Video Player", 640, 480, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
     if (!state.window) {
-        printf("Couldn't create SDL window: %s\n", SDL_GetError());
+        cout << "Couldn't create SDL window: " << SDL_GetError() << endl;
         SDL_Quit();
         return 1;
     }
@@ -121,7 +162,7 @@ int main(int argc, const char** argv) {
     // Crear el contexto OpenGL
     state.gl_context = SDL_GL_CreateContext(state.window);
     if (!state.gl_context) {
-        printf("Couldn't create OpenGL context: %s\n", SDL_GetError());
+        cout << "Couldn't create OpenGL context: " << SDL_GetError() << endl;
         SDL_DestroyWindow(state.window);
         SDL_Quit();
         return 1;
@@ -137,11 +178,11 @@ int main(int argc, const char** argv) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
 
-    SDL_GL_SetSwapInterval(1);
+    //SDL_GL_SetSwapInterval(1);
 
     // Abrir el archivo de video
-    if (!video_reader_open(&state, "D:\\peliculas\\videos\\ManureFetish-Aiyana-queen-of-the-dung-full-HD.mp4")) {
-        printf("Couldn't open video file\n");
+    if (!video_reader_open(&state, "D:\\peliculas\\videos\\5806.mp4")) {
+        cout << "Couldn't open video file" << endl;
         SDL_DestroyWindow(state.window);
         SDL_Quit();
         return 1;
@@ -159,7 +200,7 @@ int main(int argc, const char** argv) {
 
     SDL_AudioStream* audio_stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
     if (!audio_stream) {
-        printf("Failed to open audio stream: %s\n", SDL_GetError());
+        cout << "Failed to open audio stream: " << SDL_GetError() << endl;
         video_reader_close(&state);
         SDL_DestroyWindow(state.window);
         SDL_Quit();
@@ -172,14 +213,14 @@ int main(int argc, const char** argv) {
     state.audio_clock = 0.0;
     state.video_clock = 0.0;
 
-		// Variables para el tiempo de reproducción usando std::chrono
-    using Clock = std::chrono::high_resolution_clock;
+		// Variables para el tiempo de reproducción usando chrono
+    using Clock = chrono::high_resolution_clock;
     Clock::time_point start_time = Clock::now();
 
 		//Hilos adicionales:
-    state.decode_thread = new std::thread(decode_thread, &state);
-    state.audio_thread = new std::thread(audio_thread, &state, audio_stream);
-		std::thread* log_thread = new std::thread(monitor_queue_sizes, &state);
+    state.decode_thread = new thread(decode_thread, &state);
+    state.audio_thread = new thread(audio_thread, &state, audio_stream);
+		thread* log_thread = new thread(monitor_queue_sizes, &state);
 
 		double pt_seconds;
     SDL_Event event;
@@ -192,11 +233,11 @@ int main(int argc, const char** argv) {
         }
         if (state.video_queue.dequeue(vf)) {
 						render_video_frame(&state, vf);
-						//std::cout << "Video data played, PTS: " << vf.pts << std::endl;
+						cout << "Video frame played, PTS: " << vf.pts << endl;
 						pt_seconds = vf.pts * (double)state.video_time_base.num / (double)state.video_time_base.den;
 						// Sincronizar con el tiempo de reproducción.
             Clock::time_point current_time = Clock::now();
-            std::chrono::duration<double> elapsed_seconds = current_time - start_time;
+            chrono::duration<double> elapsed_seconds = current_time - start_time;
             while (pt_seconds > elapsed_seconds.count()) {
 							SDL_Delay(0);
 							current_time = Clock::now();

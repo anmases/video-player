@@ -1,4 +1,5 @@
 #include "video_reader.hpp"
+using namespace std;
 
 bool video_reader_open(VideoState* state, const char* filename) {
     auto& width = state->width;
@@ -19,11 +20,11 @@ bool video_reader_open(VideoState* state, const char* filename) {
     // Abrir el archivo usando avformat
     format_context = avformat_alloc_context();
     if (!format_context) {
-        printf("Couldn't create AV format context\n");
+				cout << "Couldn't create AV format context" << endl;
         return false;
     }
     if (avformat_open_input(&format_context, filename, NULL, NULL) != 0) {
-        printf("Couldn't open video file\n");
+				cout << "Couldn't open video file" << endl;
         return false;
     }
 
@@ -57,99 +58,99 @@ bool video_reader_open(VideoState* state, const char* filename) {
     }
 
     if (video_stream_index == -1) {
-        printf("Couldn't find video stream\n");
+				cout << "Couldn't find video stream" << endl;
         return false;
     }
 
     if (audio_stream_index == -1) {
-        printf("Couldn't find audio stream\n");
+				cout << "Couldn't find audio stream" << endl;
         return false;
     }
 
     // Configurar el contexto del códec de video
     video_codec_context = avcodec_alloc_context3(video_codec);
     if (!video_codec_context) {
-        printf("Couldn't create video codec context\n");
+				cout << "Couldn't create video codec context" << endl;
         return false;
     }
     if (avcodec_parameters_to_context(video_codec_context, format_context->streams[video_stream_index]->codecpar) < 0) {
-        printf("Couldn't initialize video codec context\n");
+				cout << "Couldn't initialize video codec context" << endl;
         return false;
     }
     if (avcodec_open2(video_codec_context, video_codec, nullptr) < 0) {
-        printf("Couldn't open video codec\n");
+				cout << "Couldn't open video codec" << endl;
         return false;
     }
 
     // Configurar el contexto del códec de audio
     audio_codec_context = avcodec_alloc_context3(audio_codec);
     if (!audio_codec_context) {
-        printf("Couldn't create audio codec context\n");
+				cout << "Couldn't create audio codec context" << endl;
         return false;
     }
     if (avcodec_parameters_to_context(audio_codec_context, format_context->streams[audio_stream_index]->codecpar) < 0) {
-        printf("Couldn't initialize audio codec context\n");
+				cout << "Couldn't initialize audio codec context" << endl;
         return false;
     }
     if (avcodec_open2(audio_codec_context, audio_codec, nullptr) < 0) {
-        printf("Couldn't open audio codec\n");
+				cout << "Couldn't open audio codec" << endl;
         return false;
     }
 
 	// Inicializar SwrContext para la conversión de formato de audio
 state->swr_context = swr_alloc();
 if (!state->swr_context) {
-    printf("Couldn't allocate SwrContext\n");
+		cout << "Couldn't allocate SwrContext" << endl;
     return false;
 }
 // Configurar el SwrContext
 AVChannelLayout in_ch_layout = audio_codec_context->ch_layout;
 AVChannelLayout out_ch_layout;
-av_channel_layout_default(&out_ch_layout, 2);  // Salida en estéreo
+av_channel_layout_default(&out_ch_layout, audio_codec_context->ch_layout.nb_channels);  // Salida en estéreo
 int ret = av_opt_set_chlayout(state->swr_context, "in_chlayout", &in_ch_layout, 0);
 if (ret < 0) {
     char errbuf[AV_ERROR_MAX_STRING_SIZE];
     av_make_error_string(errbuf, AV_ERROR_MAX_STRING_SIZE, ret);
-    printf("Error setting input channel layout: %s\n", errbuf);
+		cout << "Error setting input channel layout: " << errbuf << endl;
     return false;
 }
 ret = av_opt_set_chlayout(state->swr_context, "out_chlayout", &out_ch_layout, 0);
 if (ret < 0) {
     char errbuf[AV_ERROR_MAX_STRING_SIZE];
     av_make_error_string(errbuf, AV_ERROR_MAX_STRING_SIZE, ret);
-    printf("Error setting output channel layout: %s\n", errbuf);
+		cout << "Error setting output channel layout: " << errbuf << endl;
     return false;
 }
 ret = av_opt_set_int(state->swr_context, "in_sample_rate", audio_codec_context->sample_rate, 0);
 if (ret < 0) {
     char errbuf[AV_ERROR_MAX_STRING_SIZE];
     av_make_error_string(errbuf, AV_ERROR_MAX_STRING_SIZE, ret);
-    printf("Error setting input sample rate: %s\n", errbuf);
+		cout << "Error setting input sample rate: " << errbuf << endl;
     return false;
 }
 ret = av_opt_set_int(state->swr_context, "out_sample_rate", audio_codec_context->sample_rate, 0);
 if (ret < 0) {
     char errbuf[AV_ERROR_MAX_STRING_SIZE];
     av_make_error_string(errbuf, AV_ERROR_MAX_STRING_SIZE, ret);
-    printf("Error setting output sample rate: %s\n", errbuf);
+		cout << "Error setting output sample rate: " << errbuf << endl;
     return false;
 }
 ret = av_opt_set_sample_fmt(state->swr_context, "in_sample_fmt", audio_codec_context->sample_fmt, 0);
 if (ret < 0) {
     char errbuf[AV_ERROR_MAX_STRING_SIZE];
     av_make_error_string(errbuf, AV_ERROR_MAX_STRING_SIZE, ret);
-    printf("Error setting input sample format: %s\n", errbuf);
+		cout << "Error setting input sample format: " << errbuf << endl;
     return false;
 }
 ret = av_opt_set_sample_fmt(state->swr_context, "out_sample_fmt", AV_SAMPLE_FMT_S16, 0);
 if (ret < 0) {
     char errbuf[AV_ERROR_MAX_STRING_SIZE];
     av_make_error_string(errbuf, AV_ERROR_MAX_STRING_SIZE, ret);
-    printf("Error setting output sample format: %s\n", errbuf);
+		cout << "Error setting output sample format: " << errbuf << endl;
     return false;
 }
 if (swr_init(state->swr_context) < 0) {
-    printf("Couldn't initialize the SwrContext\n");
+		cout << "Couldn't initialize the SwrContext" << endl;
     swr_free(&state->swr_context);
     return false;
 }
@@ -159,7 +160,7 @@ if (swr_init(state->swr_context) < 0) {
     av_frame = av_frame_alloc();
     av_packet = av_packet_alloc();
     if (!av_packet || !av_frame) {
-        printf("Couldn't allocate memory for AV frame or AV packet\n");
+				cout << "Couldn't allocate memory for AV frame or AV packet" << endl;
         return false;
     }
 
@@ -203,7 +204,7 @@ void decode_video_packet(VideoState* state, AVPacket* packet, VideoFrame& vf) {
 
         // Inicializar o reutilizar el sws_context si no está inicializado
         if (!state->sws_context || state->sws_context == 0) {
-						printf("initialize scaler");
+						cout << "initialize scaler" << endl;
             state->sws_context = sws_getContext(
                 frame->width,
                 frame->height,
@@ -216,10 +217,10 @@ void decode_video_packet(VideoState* state, AVPacket* packet, VideoFrame& vf) {
             );
 
             if (!state->sws_context) {
-                printf("Couldn't initialize SW scaler\n");
+								cout << "Couldn't initialize SW scaler" << endl;
                 av_frame_free(&frame);
-                delete[] vf.data; // Liberar si se asignó
-                vf.data = nullptr; // Evitar doble liberación
+                delete[] vf.data;
+                vf.data = nullptr;
                 return;
             }
         }
@@ -227,9 +228,9 @@ void decode_video_packet(VideoState* state, AVPacket* packet, VideoFrame& vf) {
         // Realizar la conversión de escalado
         int result = sws_scale(state->sws_context, frame->data, frame->linesize, 0, frame->height, dest, dest_linesize);
         if (result <= 0) {
-            printf("sws_scale failed with error code: %d\n", result);
-            delete[] vf.data; // Liberar si falla la conversión
-            vf.data = nullptr; // Evitar doble liberación
+						cout << "sws_scale failed with error code: " << result << endl;
+            delete[] vf.data;
+            vf.data = nullptr;
         }
     }
     av_frame_free(&frame);
