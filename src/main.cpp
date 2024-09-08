@@ -1,21 +1,13 @@
-#include <SDL3/SDL.h>
-#include <chrono>
-#include <iostream>
 #include "video_reader.hpp"
-#include <GL/gl.h>
-#include <thread>
-#include <atomic>
-#include <mutex>
 
-#define AV_SYNC_THRESHOLD 0.01  // Umbral de sincronización en segundos (10 ms)
+
+#define AV_SYNC_THRESHOLD 3.0  // Umbral de sincronización en segundos (10 ms)
 #define AV_NOSYNC_THRESHOLD 10.0 // Umbral para decidir no sincronizar (10 segundos)
-
-using namespace std;
 
 mutex render_mutex;
 
 void decode_thread(VideoState* state) {
-    AVPacket* packet = av_packet_alloc();
+   AVPacket* packet = av_packet_alloc();
     bool end_of_stream = false;
 		VideoFrame vf;
 		AudioData ad;
@@ -40,21 +32,25 @@ void decode_thread(VideoState* state) {
                 continue;
             }
         }
+				//Ajustar velocidad de decoding con DTS.
+				if (packet->dts != AV_NOPTS_VALUE) {
+						static double initial_dts = packet->dts;
+						static auto start_time = chrono::high_resolution_clock::now();
+						double normalized_dts = (packet->dts - initial_dts) * av_q2d(state->format_context->streams[packet->stream_index]->time_base);
 
-        // Sincronización usando DTS
-        if (packet->dts != AV_NOPTS_VALUE) {
-            packet_dts = packet->dts * av_q2d(state->format_context->streams[packet->stream_index]->time_base);
+						// Calcular el tiempo transcurrido desde el inicio de la reproducción
+						auto current_time = chrono::high_resolution_clock::now();
+						chrono::duration<double> elapsed_seconds = current_time - start_time;
 
-            // Tiempo actual de reproducción
-            Clock::time_point current_time = Clock::now();
-            chrono::duration<double> elapsed_seconds = current_time - start_time;
+						// Sincronizar el decodificador con el tiempo transcurrido
+						if (normalized_dts > elapsed_seconds.count()) {
+								double wait_time = (normalized_dts - elapsed_seconds.count()) * 1000;
+								if (wait_time > 0) {
+										this_thread::sleep_for(chrono::milliseconds(static_cast<int>(wait_time)));
+								}
+						}
+				}
 
-            // Esperar hasta que sea el momento adecuado para decodificar este paquete
-            while (packet_dts > elapsed_seconds.count()) {
-                current_time = Clock::now();
-                elapsed_seconds = current_time - start_time;
-            }
-        }
 
         if (packet->stream_index == state->video_stream_index && !state->video_queue.full()) {
             decode_video_packet(state, packet, vf);
@@ -68,9 +64,8 @@ void decode_thread(VideoState* state) {
                 state->audio_queue.enqueue(ad);
                 cout << "Audio data enqueued, PTS: " << ad.pts << endl;
             }
-        } else {
-					av_packet_unref(packet);
-				}      
+        }
+				av_packet_unref(packet);	
     }
     av_packet_free(&packet);
 		cout << "quit decoding thread" << endl;
@@ -79,16 +74,20 @@ void decode_thread(VideoState* state) {
 
 void audio_thread(VideoState* state, SDL_AudioStream* audio_stream) {
 		AudioData ad;
+		static double initial_audio_pts = -1;
 		double audio_pts;
     while (!state->quit || !state->audio_queue.empty()) {
         if (state->audio_queue.dequeue(ad)) {
-            double audio_pts = ad.pts;
+						audio_pts = ad.pts;
+						if(initial_audio_pts < 0){
+							initial_audio_pts = audio_pts;
+						}
             if (SDL_PutAudioStreamData(audio_stream, ad.data, ad.size) == SDL_FALSE) {
               cout << "Error while putting audio data: " << SDL_GetError() << endl;
             }
-            state->audio_clock = audio_pts;
+            state->audio_clock = (audio_pts - initial_audio_pts);
             delete[] ad.data;
-            cout << "Audio chunk played, PTS: " << audio_pts << endl;
+            cout << "Audio chunk played, PTS: " << state->audio_clock << endl;
         }
     }
 		cout << "End Audio procesing - quit audio thread" << endl;
@@ -140,11 +139,9 @@ int main(int argc, const char** argv) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-
-    //SDL_GL_SetSwapInterval(1);
-
+		const char* canal = "http://barous.top:8080/23171136982494/71711369824541/5622";
     // Abrir el archivo de video
-    if (!video_reader_open(&state, "D:\\peliculas\\altered_carbon\\001.mp4")) {
+    if (!video_reader_open(&state, canal)) {
         cout << "Couldn't open video file" << endl;
         SDL_DestroyWindow(state.window);
         SDL_Quit();
@@ -186,7 +183,9 @@ int main(int argc, const char** argv) {
 		thread* log_thread = new thread(monitor_queue_sizes, &state);
 		SDL_Event event;
 
-		double pt_seconds;
+		double normalized_pts;
+		double initial_video_pts = -1;
+		double video_pts;
 		VideoFrame vf;
     while (!state.quit || !state.video_queue.empty()) {
         while (SDL_PollEvent(&event)) {
@@ -195,34 +194,29 @@ int main(int argc, const char** argv) {
             }
         }
 					if (state.video_queue.dequeue(vf)) {
+						static double initial_video_pts = vf.pts;  // Almacena el primer PTS del video
+						static auto start_time = chrono::high_resolution_clock::now();  // Marca el tiempo de inicio del video
+						
+						// Normalizar el PTS del video usando el primer PTS
+						double normalized_pts = (vf.pts - initial_video_pts) * (double)state.video_time_base.num / (double)state.video_time_base.den;
+						
+						// Calcular el tiempo transcurrido desde el inicio de la reproducción
+						auto current_time = chrono::high_resolution_clock::now();
+						chrono::duration<double> elapsed_seconds = current_time - start_time;
 
-							double pt_seconds = vf.pts * (double)state.video_time_base.num / (double)state.video_time_base.den;
-							double master_clock = state.audio_clock;  // Usar el reloj de audio como referencia
+						// Sincronizar el frame con el tiempo transcurrido
+						if (normalized_pts > elapsed_seconds.count()) {
+								// Esperar hasta que sea el momento de mostrar el frame
+								double wait_time = (normalized_pts - elapsed_seconds.count()) * 1000;  // Convertir a milisegundos
+								if (wait_time > 0) {
+										this_thread::sleep_for(chrono::milliseconds(static_cast<int>(wait_time)));
+								}
+						}
+						render_video_frame(&state, vf);
+						cout << "Video frame played, PTS: " << vf.pts << endl;
+						delete[] vf.data;
+				}
 
-							// Sincronizar el cuadro de video con el reloj de audio
-							if (pt_seconds > master_clock) {
-									// Si el cuadro está adelantado, esperar el tiempo necesario
-									this_thread::sleep_for(chrono::milliseconds(static_cast<int>((pt_seconds - master_clock) * 1000)));
-							} else if (pt_seconds < master_clock - AV_SYNC_THRESHOLD) {
-									// Si el cuadro está retrasado y fuera del umbral de sincronización, se puede descartar
-									if (master_clock - pt_seconds > AV_NOSYNC_THRESHOLD) {
-											cout << "Skipping frame, too late to display, PTS: " << vf.pts << endl;
-											delete[] vf.data;
-											continue;  // Ir al siguiente cuadro sin renderizar este
-									}
-							}
-							render_video_frame(&state, vf);
-							cout << "Video frame played, PTS: " << vf.pts << endl;
-							pt_seconds = vf.pts * (double)state.video_time_base.num / (double)state.video_time_base.den;
-							// Sincronizar con el tiempo de reproducción.
-							/*Clock::time_point current_time = Clock::now();
-							chrono::duration<double> elapsed_seconds = current_time - start_time;
-							while (pt_seconds > elapsed_seconds.count()) {
-								current_time = Clock::now();
-								elapsed_seconds = current_time - start_time;
-							}*/
-							delete[] vf.data;
-					}
     }
 		cout << "End rendering video frames" << endl;
 

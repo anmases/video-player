@@ -7,6 +7,7 @@
 #include <queue>
 #include <thread>
 #include <atomic>
+#include <chrono>
 #include <GL/gl.h>
 extern "C" {
     #include <libavcodec/avcodec.h>
@@ -97,6 +98,7 @@ struct VideoState {
     int width;
     int height;
     AVRational video_time_base;
+		AVRational audio_time_base;
     AVFormatContext* format_context = nullptr;
     AVCodecContext* video_codec_context = nullptr;
     AVCodecContext* audio_codec_context = nullptr;
@@ -145,7 +147,3 @@ unsigned int video_refresh_timer(void* userdata, SDL_TimerID timerID, Uint32 int
 void render_video_frame(VideoState* state, const VideoFrame& vf);
 
 #endif
-
-
-
-

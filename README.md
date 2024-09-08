@@ -1,5 +1,5 @@
 # Video player.
-This is a basic cross-platform video player using FFmpeg to process video codecs and OpenGL to display windows.
+This is a basic cross-platform video player using FFmpeg to process video codecs and SDL3 to display windows.
 ## Add submodules:
 ```bash
 git submodule init
