@@ -186,152 +186,149 @@ bool video_reader_open(VideoState* state, const char* filename) {
     return true;
 }
 
-
 void video_reader_close(VideoState* state) {
-    // Limpiar el contexto de códec y formato
-    sws_freeContext(state->sws_context);
-    swr_free(&state->swr_context);
-    avformat_close_input(&state->format_context);
-    avformat_free_context(state->format_context);
-		avformat_network_deinit();
-    av_frame_free(&state->av_frame);
-    av_packet_free(&state->av_packet);
-    av_frame_free(&state->audio_frame);
-    av_packet_free(&state->audio_packet);
-    avcodec_free_context(&state->video_codec_context);
-    avcodec_free_context(&state->audio_codec_context);
+	sws_freeContext(state->sws_context);
+	swr_free(&state->swr_context);
+	avformat_close_input(&state->format_context);
+	avformat_free_context(state->format_context);
+	avformat_network_deinit();
+	av_frame_free(&state->av_frame);
+	av_packet_free(&state->av_packet);
+	av_frame_free(&state->audio_frame);
+	av_packet_free(&state->audio_packet);
+	avcodec_free_context(&state->video_codec_context);
+	avcodec_free_context(&state->audio_codec_context);
 }
+
 
 void decode_video_packet(VideoState* state, AVPacket* packet, VideoFrame& vf) {
-    AVFrame* frame = av_frame_alloc();
-    int response = avcodec_send_packet(state->video_codec_context, packet);
-    if (response < 0) {
-        cout << "Error sending video packet, response: " << response << endl;
-        av_frame_free(&frame);
-        return;
-    }
-    response = avcodec_receive_frame(state->video_codec_context, frame);
-    if (response < 0) {
-        cout << "Error receiving video packet, response: " << response << endl;
-        av_frame_free(&frame);
-        return;
-    }
+	AVFrame* frame = av_frame_alloc();
+	int response = avcodec_send_packet(state->video_codec_context, packet);
+	if (response < 0) {
+			cout << "Error sending video packet, response: " << response << endl;
+			av_frame_free(&frame);
+			return;
+	}
+	response = avcodec_receive_frame(state->video_codec_context, frame);
+	if (response < 0) {
+			cout << "Error receiving video packet, response: " << response << endl;
+			av_frame_free(&frame);
+			return;
+	}
 
-       // Almacenar el PTS (Presentation Timestamp) del frame
-    double valid_pts = (frame->pts != AV_NOPTS_VALUE) ? frame->pts : frame->best_effort_timestamp;
-    vf.pts = valid_pts;
-    vf.width = frame->width;
-    vf.height = frame->height;
+	// Almacenar el PTS (Presentation Timestamp) del frame
+	double valid_pts = (frame->pts != AV_NOPTS_VALUE) ? frame->pts : frame->best_effort_timestamp;
+	vf.pts = valid_pts;
+	vf.width = frame->width;
+	vf.height = frame->height;
 
- 		// Copiar los datos del frame (deep copy)
-    for (int i = 0; i < AV_NUM_DATA_POINTERS && frame->data[i]; i++) {
-        if (frame->data[i] == nullptr) {
-            cout << "Invalid data pointer for plane " << i << endl;
-            continue;
-        }
-        int plane_height = (i == 0) ? frame->height : (frame->height + 1) / 2;
-        int num_bytes = frame->linesize[i] * plane_height;
-        if (num_bytes <= 0) {
-            cout << "Invalid size for plane " << i << ": " << num_bytes << endl;
-            continue;
-        }
-        vf.data[i] = new uint8_t[num_bytes];
-        memcpy(vf.data[i], frame->data[i], num_bytes);
-        vf.linesize[i] = frame->linesize[i];
-    }
+	// Copiar los datos del frame (deep copy)
+	for (int i = 0; i < AV_NUM_DATA_POINTERS && frame->data[i]; i++) {
+			if (frame->data[i] == nullptr) {
+					cout << "Invalid data pointer for plane " << i << endl;
+					continue;
+			}
+			int plane_height = (i == 0) ? frame->height : (frame->height + 1) / 2;
+			int num_bytes = frame->linesize[i] * plane_height;
+			if (num_bytes <= 0) {
+					cout << "Invalid size for plane " << i << ": " << num_bytes << endl;
+					continue;
+			}
+			vf.data[i] = new uint8_t[num_bytes];
+			memcpy(vf.data[i], frame->data[i], num_bytes);
+			vf.linesize[i] = frame->linesize[i];
+	}
 
-
-    av_frame_free(&frame);
+	av_frame_free(&frame);
 }
-
 
 
 void decode_audio_packet(VideoState* state, AVPacket* packet, AudioData& ad) {
-    AVFrame* frame = av_frame_alloc();
-    int response = avcodec_send_packet(state->audio_codec_context, packet);
-    if (response < 0) {
-        av_frame_free(&frame);
-        return;
-    }
-    response = avcodec_receive_frame(state->audio_codec_context, frame);
-    if (response >= 0) {
-        int dst_nb_samples = av_rescale_rnd(
-            swr_get_delay(state->swr_context, state->audio_codec_context->sample_rate) + frame->nb_samples,
-            state->audio_codec_context->sample_rate,
-            state->audio_codec_context->sample_rate,
-            AV_ROUND_UP
-        );
-				double valid_pts = (frame->pts != AV_NOPTS_VALUE) ? frame->pts : frame -> best_effort_timestamp;
-        int data_size = av_samples_get_buffer_size(nullptr, state->audio_codec_context->ch_layout.nb_channels, dst_nb_samples, AV_SAMPLE_FMT_S16, 1);
-        ad.data = new uint8_t[data_size];
-        ad.size = data_size;
-        ad.pts = valid_pts * av_q2d(state->audio_codec_context->time_base);
-        uint8_t* out[] = { ad.data };
-        swr_convert(state->swr_context, out, dst_nb_samples, (const uint8_t**)frame->data, frame->nb_samples);
-    }
-    av_frame_free(&frame);
+	AVFrame* frame = av_frame_alloc();
+	int response = avcodec_send_packet(state->audio_codec_context, packet);
+	if (response < 0) {
+			av_frame_free(&frame);
+			return;
+	}
+	response = avcodec_receive_frame(state->audio_codec_context, frame);
+	if(response < 0){
+		cout << "Couldn't receive audio frame: " << response << endl;
+	}
+
+	int dst_nb_samples = av_rescale_rnd(
+			swr_get_delay(state->swr_context, state->audio_codec_context->sample_rate) + frame->nb_samples,
+			state->audio_codec_context->sample_rate,
+			state->audio_codec_context->sample_rate,
+			AV_ROUND_UP
+	);
+	double valid_pts = (frame->pts != AV_NOPTS_VALUE) ? frame->pts : frame -> best_effort_timestamp;
+	ad.pts = valid_pts * av_q2d(state->audio_codec_context->time_base);
+	int data_size = av_samples_get_buffer_size(nullptr, state->audio_codec_context->ch_layout.nb_channels, dst_nb_samples, AV_SAMPLE_FMT_S16, 1);
+	ad.data = new uint8_t[data_size];
+	ad.size = data_size;
+	uint8_t* out[] = { ad.data };
+	swr_convert(state->swr_context, out, dst_nb_samples, (const uint8_t**)frame->data, frame->nb_samples);
+	
+	av_frame_free(&frame);
 }
 
-
 void render_video_frame(VideoState* state, const VideoFrame& vf) {
+	// Si no se ha inicializado el contexto de escalado, inicializarlo ahora
+	if (!state->sws_context) {
+			state->sws_context = sws_getContext(
+					vf.width, vf.height,
+					state->video_codec_context->pix_fmt,
+					vf.width, vf.height,
+					AV_PIX_FMT_RGB0,  // Puedes ajustar el formato de destino
+					SWS_BILINEAR,
+					nullptr, nullptr, nullptr
+			);
+			if (!state->sws_context) {
+					cout << "Couldn't initialize SW scaler" << endl;
+					return;
+			}
+	}
 
-    // Si no se ha inicializado el contexto de escalado, inicializarlo ahora
-    if (!state->sws_context) {
-        state->sws_context = sws_getContext(
-            vf.width, vf.height,
-            state->video_codec_context->pix_fmt,
-            vf.width, vf.height,
-            AV_PIX_FMT_RGB0,  // Puedes ajustar el formato de destino
-            SWS_BILINEAR,
-            nullptr, nullptr, nullptr
-        );
-        if (!state->sws_context) {
-            cout << "Couldn't initialize SW scaler" << endl;
-            return;
-        }
-    }
+	// Calcular el tamaño del buffer de salida (escalado)
+	unsigned int num_bytes = vf.width * vf.height * 4; // 4 bytes por píxel (RGBA)
+	uint8_t* scaled_data = new uint8_t[num_bytes];
 
-    // Calcular el tamaño del buffer de salida (escalado)
-    unsigned int num_bytes = vf.width * vf.height * 4; // 4 bytes por píxel (RGBA)
-    uint8_t* scaled_data = new uint8_t[num_bytes];
+	// Preparar los buffers para `sws_scale`
+	uint8_t* dest[4] = { scaled_data, nullptr, nullptr, nullptr };
+	int dest_linesize[4] = { vf.width * 4, 0, 0, 0 }; // Ancho de la imagen * 4 bytes por píxel (RGBA)
 
-    // Preparar los buffers para `sws_scale`
-    uint8_t* dest[4] = { scaled_data, nullptr, nullptr, nullptr };
-    int dest_linesize[4] = { vf.width * 4, 0, 0, 0 }; // Ancho de la imagen * 4 bytes por píxel (RGBA)
+	// Realizar la conversión y escalado
+	int result = sws_scale(state->sws_context, vf.data, vf.linesize, 0, vf.height, dest, dest_linesize);
+	if (result <= 0) {
+			cout << "sws_scale failed with error code: " << result << endl;
+			delete[] scaled_data;
+			return;
+	}
 
-    // Realizar la conversión y escalado
-    int result = sws_scale(state->sws_context, vf.data, vf.linesize, 0, vf.height, dest, dest_linesize);
-    if (result <= 0) {
-        cout << "sws_scale failed with error code: " << result << endl;
-        delete[] scaled_data;
-        return;
-    }
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	glViewport(0, 0, vf.width, vf.height);
+	glMatrixMode(GL_PROJECTION);
+	glLoadIdentity();
+	glOrtho(0, vf.width, vf.height, 0, -1, 1);
+	glMatrixMode(GL_MODELVIEW);
 
-		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    glViewport(0, 0, vf.width, vf.height);
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    glOrtho(0, vf.width, vf.height, 0, -1, 1);
-    glMatrixMode(GL_MODELVIEW);
+	// Renderizar el frame escalado usando OpenGL
+	glBindTexture(GL_TEXTURE_2D, state->texture);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, vf.width, vf.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, scaled_data);
 
-    // Renderizar el frame escalado usando OpenGL
-    glBindTexture(GL_TEXTURE_2D, state->texture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, vf.width, vf.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, scaled_data);
+	glEnable(GL_TEXTURE_2D);
+	glBindTexture(GL_TEXTURE_2D, state->texture);
+	glBegin(GL_QUADS);
+	glTexCoord2d(0, 0); glVertex2i(0, 0);
+	glTexCoord2d(1, 0); glVertex2i(vf.width, 0);
+	glTexCoord2d(1, 1); glVertex2i(vf.width, vf.height);
+	glTexCoord2d(0, 1); glVertex2i(0, vf.height);
+	glEnd();
+	glDisable(GL_TEXTURE_2D);
 
-    glEnable(GL_TEXTURE_2D);
-    glBindTexture(GL_TEXTURE_2D, state->texture);
-    glBegin(GL_QUADS);
-    glTexCoord2d(0, 0); glVertex2i(0, 0);
-    glTexCoord2d(1, 0); glVertex2i(vf.width, 0);
-    glTexCoord2d(1, 1); glVertex2i(vf.width, vf.height);
-    glTexCoord2d(0, 1); glVertex2i(0, vf.height);
-    glEnd();
-    glDisable(GL_TEXTURE_2D);
+	SDL_GL_SwapWindow(state->window);
 
-    SDL_GL_SwapWindow(state->window);
-
-    // Limpiar el buffer de salida escalado
-    delete[] scaled_data;
+	delete[] scaled_data;
 }
 
 unsigned int video_refresh_timer(void* userdata, SDL_TimerID timerID, Uint32 interval) {

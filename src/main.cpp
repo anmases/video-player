@@ -8,6 +8,8 @@
 
 mutex render_mutex;
 
+/// @brief Decodes audio and video frames both sinchronized, but must be in a separated thread.
+/// @param state 
 void decode_thread(VideoState* state) {
    	AVPacket* packet = av_packet_alloc();
     bool end_of_stream = false;
@@ -80,7 +82,9 @@ void decode_thread(VideoState* state) {
 		cout << "quit decoding thread" << endl;
 }
 
-
+/// @brief This thread resample and enqueue audio frames on SDL.
+/// @param state 
+/// @param audio_stream 
 void audio_thread(VideoState* state, SDL_AudioStream* audio_stream) {
 		AudioData ad;
 		static double initial_audio_pts = -1;
@@ -102,6 +106,8 @@ void audio_thread(VideoState* state, SDL_AudioStream* audio_stream) {
 		cout << "End Audio procesing - quit audio thread" << endl;
 }
 
+/// @brief Monitor the queue sizes and log it on console.
+/// @param state 
 void monitor_queue_sizes(VideoState* state) {
     while (!state->quit) {
         cout << "Tamaño de la cola de video: " << state->video_queue.size() << endl;
@@ -112,6 +118,8 @@ void monitor_queue_sizes(VideoState* state) {
     }
 }
 
+/// @brief This is to create a pre-buffer to fill the decoding queue.
+/// @param state 
 void prebuffer(VideoState* state) {
     cout << "Starting prebuffering..." << endl;
     while (state->audio_queue.size() < AUDIO_PREBUFFER_THRESHOLD) {
@@ -120,7 +128,11 @@ void prebuffer(VideoState* state) {
     cout << "Prebuffering complete. Video and audio queues are filled." << endl;
 }
 
-
+/// @brief Entry point of the video player application.
+/// Initializes SDL, creates textures for the screen, launches the threads and render video frames.
+/// @param argc 
+/// @param argv 
+/// @return `0` when the app finishes well.
 int main(int argc, const char** argv) {
     VideoState state;
 
