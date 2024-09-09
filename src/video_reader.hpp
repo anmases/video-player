@@ -23,10 +23,81 @@ extern "C" {
 using namespace std;
 
 struct VideoFrame {
-    uint8_t* data = nullptr;
-    int width;
-    int height;
-    double pts;
+	uint8_t* data[AV_NUM_DATA_POINTERS] = {nullptr};
+	int linesize[AV_NUM_DATA_POINTERS] = {0};
+	int height;
+	int width;
+	double pts;
+
+	/// Constructor por defecto
+	VideoFrame() : height(0), width(0), pts(0.0) {
+			for (int i = 0; i < AV_NUM_DATA_POINTERS; i++) {
+					data[i] = nullptr;
+					linesize[i] = 0;
+			}
+	}
+	// Constructor de copia profunda
+	VideoFrame(const VideoFrame& other) {
+        width = other.width;
+        height = other.height;
+        pts = other.pts;
+        for (int i = 0; i < AV_NUM_DATA_POINTERS; i++) {
+            if (other.data[i] != nullptr) {
+								int plane_height = (i == 0) ? other.height : (other.height + 1) / 2;
+								int num_bytes = other.linesize[i] * plane_height;
+                data[i] = new uint8_t[num_bytes];
+								if (num_bytes <= 0) {
+									cout << "Invalid size for plane " << i << ": " << num_bytes << endl;
+									continue;
+								}
+                memcpy(data[i], other.data[i], num_bytes);
+                linesize[i] = other.linesize[i];
+            } else {
+                data[i] = nullptr;
+                linesize[i] = 0;
+            }
+        }
+    }
+	///Operador de asignación con copia profunda
+	VideoFrame& operator = (const VideoFrame& other) {
+			if (this != &other) {
+					for (int i = 0; i < AV_NUM_DATA_POINTERS; i++) {
+							delete[] data[i];
+							data[i] = nullptr;
+					}
+					width = other.width;
+        	height = other.height;
+        	pts = other.pts;
+					for (int i = 0; i < AV_NUM_DATA_POINTERS; i++) {
+							if (other.data[i] != nullptr) {
+									int plane_height = (i == 0) ? other.height : (other.height + 1) / 2;
+									int num_bytes = other.linesize[i] * plane_height;
+									data[i] = new uint8_t[num_bytes];
+									if (num_bytes <= 0) {
+										cout << "Invalid size for plane " << i << ": " << num_bytes << endl;
+										continue;
+									}
+									memcpy(data[i], other.data[i], num_bytes);
+									linesize[i] = other.linesize[i];
+							} else {
+									data[i] = nullptr;
+									linesize[i] = 0;
+							}
+					}
+			}
+			return *this;
+	}
+	/// Destructor por defecto para liberar memoria dinámica
+	~VideoFrame() {
+			for (int i = 0; i < AV_NUM_DATA_POINTERS; i++) {
+					linesize[i] = 0;
+					delete[] data[i];
+					data[i] = nullptr;
+			}
+			height = 0;
+			width = 0;
+			pts = 0.0;
+	}
 };
 
 struct AudioData {

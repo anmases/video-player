@@ -206,59 +206,44 @@ void decode_video_packet(VideoState* state, AVPacket* packet, VideoFrame& vf) {
     AVFrame* frame = av_frame_alloc();
     int response = avcodec_send_packet(state->video_codec_context, packet);
     if (response < 0) {
-				cout << "Error sending video packet, response: " << response << endl;
+        cout << "Error sending video packet, response: " << response << endl;
         av_frame_free(&frame);
         return;
     }
     response = avcodec_receive_frame(state->video_codec_context, frame);
-		if(response < 0){
-			cout << "Error receiving video packet, response: " << response << endl;
-			av_frame_free(&frame);
-      return;
-		}
-		double valid_pts = (frame->pts != AV_NOPTS_VALUE) ? frame->pts : frame -> best_effort_timestamp;
-		vf.width = frame->width;
-		vf.height = frame->height;
-		vf.pts = valid_pts;
+    if (response < 0) {
+        cout << "Error receiving video packet, response: " << response << endl;
+        av_frame_free(&frame);
+        return;
+    }
 
-		// Calcular el tamaño de la imagen
-		unsigned int num_bytes = vf.width * vf.height * 4;
-		vf.data = new uint8_t[num_bytes];
+       // Almacenar el PTS (Presentation Timestamp) del frame
+    double valid_pts = (frame->pts != AV_NOPTS_VALUE) ? frame->pts : frame->best_effort_timestamp;
+    vf.pts = valid_pts;
+    vf.width = frame->width;
+    vf.height = frame->height;
 
-		uint8_t* dest[4] = { vf.data, nullptr, nullptr, nullptr };
-		int dest_linesize[4] = { frame->width * 4, 0, 0, 0 };
+ 		// Copiar los datos del frame (deep copy)
+    for (int i = 0; i < AV_NUM_DATA_POINTERS && frame->data[i]; i++) {
+        if (frame->data[i] == nullptr) {
+            cout << "Invalid data pointer for plane " << i << endl;
+            continue;
+        }
+        int plane_height = (i == 0) ? frame->height : (frame->height + 1) / 2;
+        int num_bytes = frame->linesize[i] * plane_height;
+        if (num_bytes <= 0) {
+            cout << "Invalid size for plane " << i << ": " << num_bytes << endl;
+            continue;
+        }
+        vf.data[i] = new uint8_t[num_bytes];
+        memcpy(vf.data[i], frame->data[i], num_bytes);
+        vf.linesize[i] = frame->linesize[i];
+    }
 
-		// Inicializar o reutilizar el sws_context si no está inicializado
-		if (!state->sws_context || state->sws_context == 0) {
-				cout << "initialize scaler" << endl;
-				state->sws_context = sws_getContext(
-						frame->width,
-						frame->height,
-						state->video_codec_context->pix_fmt,
-						frame->width,
-						frame->height,
-						AV_PIX_FMT_RGB0,
-						SWS_BILINEAR,
-						nullptr, nullptr, nullptr
-				);
 
-				if (!state->sws_context) {
-						cout << "Couldn't initialize SW scaler" << endl;
-						av_frame_free(&frame);
-						delete[] vf.data;
-						vf.data = nullptr;
-						return;
-				}
-		}
-		// Realizar la conversión de escalado
-		int result = sws_scale(state->sws_context, frame->data, frame->linesize, 0, frame->height, dest, dest_linesize);
-		if (result <= 0) {
-				cout << "sws_scale failed with error code: " << result << endl;
-				delete[] vf.data;
-				vf.data = nullptr;
-		}
     av_frame_free(&frame);
 }
+
 
 
 void decode_audio_packet(VideoState* state, AVPacket* packet, AudioData& ad) {
@@ -289,15 +274,49 @@ void decode_audio_packet(VideoState* state, AVPacket* packet, AudioData& ad) {
 
 
 void render_video_frame(VideoState* state, const VideoFrame& vf) {
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    // Si no se ha inicializado el contexto de escalado, inicializarlo ahora
+    if (!state->sws_context) {
+        state->sws_context = sws_getContext(
+            vf.width, vf.height,
+            state->video_codec_context->pix_fmt,
+            vf.width, vf.height,
+            AV_PIX_FMT_RGB0,  // Puedes ajustar el formato de destino
+            SWS_BILINEAR,
+            nullptr, nullptr, nullptr
+        );
+        if (!state->sws_context) {
+            cout << "Couldn't initialize SW scaler" << endl;
+            return;
+        }
+    }
+
+    // Calcular el tamaño del buffer de salida (escalado)
+    unsigned int num_bytes = vf.width * vf.height * 4; // 4 bytes por píxel (RGBA)
+    uint8_t* scaled_data = new uint8_t[num_bytes];
+
+    // Preparar los buffers para `sws_scale`
+    uint8_t* dest[4] = { scaled_data, nullptr, nullptr, nullptr };
+    int dest_linesize[4] = { vf.width * 4, 0, 0, 0 }; // Ancho de la imagen * 4 bytes por píxel (RGBA)
+
+    // Realizar la conversión y escalado
+    int result = sws_scale(state->sws_context, vf.data, vf.linesize, 0, vf.height, dest, dest_linesize);
+    if (result <= 0) {
+        cout << "sws_scale failed with error code: " << result << endl;
+        delete[] scaled_data;
+        return;
+    }
+
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glViewport(0, 0, vf.width, vf.height);
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
     glOrtho(0, vf.width, vf.height, 0, -1, 1);
     glMatrixMode(GL_MODELVIEW);
 
+    // Renderizar el frame escalado usando OpenGL
     glBindTexture(GL_TEXTURE_2D, state->texture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, vf.width, vf.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, vf.data);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, vf.width, vf.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, scaled_data);
 
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, state->texture);
@@ -308,7 +327,11 @@ void render_video_frame(VideoState* state, const VideoFrame& vf) {
     glTexCoord2d(0, 1); glVertex2i(0, vf.height);
     glEnd();
     glDisable(GL_TEXTURE_2D);
+
     SDL_GL_SwapWindow(state->window);
+
+    // Limpiar el buffer de salida escalado
+    delete[] scaled_data;
 }
 
 unsigned int video_refresh_timer(void* userdata, SDL_TimerID timerID, Uint32 interval) {
@@ -318,7 +341,12 @@ unsigned int video_refresh_timer(void* userdata, SDL_TimerID timerID, Uint32 int
         VideoFrame vf;
         if (state->video_queue.dequeue(vf)) {
             render_video_frame(state, vf);
-            delete[] vf.data;
+            for (int i = 0; i < AV_NUM_DATA_POINTERS; i++) {
+							if (vf.data[i]) {
+									delete[] vf.data[i]; 
+									vf.data[i] = nullptr;
+							}
+						}
 
             SDL_AddTimer(interval, video_refresh_timer, state);
         }

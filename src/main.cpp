@@ -3,13 +3,14 @@
 
 #define AV_SYNC_THRESHOLD 3.0  // Umbral de sincronización en segundos (10 ms)
 #define AV_NOSYNC_THRESHOLD 10.0 // Umbral para decidir no sincronizar (10 segundos)
+#define VIDEO_PREBUFFER_THRESHOLD 10  // Número mínimo de frames de video
+#define AUDIO_PREBUFFER_THRESHOLD 10  // Número mínimo de chunks de audio
 
 mutex render_mutex;
 
 void decode_thread(VideoState* state) {
-   AVPacket* packet = av_packet_alloc();
+   	AVPacket* packet = av_packet_alloc();
     bool end_of_stream = false;
-		VideoFrame vf;
 		AudioData ad;
 		double packet_dts;
 
@@ -32,6 +33,28 @@ void decode_thread(VideoState* state) {
                 continue;
             }
         }
+
+				if (packet->stream_index == state->video_stream_index && !state->video_queue.full()) {
+					VideoFrame vf;
+					decode_video_packet(state, packet, vf);
+					if (vf.data[0] != nullptr && vf.data[0] != 0) {
+							state->video_queue.enqueue(vf);
+							cout << "Video frame enqueued, PTS: " << vf.pts << endl;
+					}
+        } else if (packet->stream_index == state->audio_stream_index && !state->audio_queue.full()) {
+            decode_audio_packet(state, packet, ad);
+            if (ad.data != nullptr) {
+                state->audio_queue.enqueue(ad);
+                cout << "Audio data enqueued, PTS: " << ad.pts << endl;
+            }
+        }
+
+				if(state->audio_queue.empty() || state->video_queue.empty()){
+					cout << "Prebuffering" << endl;
+					av_packet_unref(packet);
+					continue;
+        }
+
 				//Ajustar velocidad de decoding con DTS.
 				if (packet->dts != AV_NOPTS_VALUE) {
 						static double initial_dts = packet->dts;
@@ -51,20 +74,6 @@ void decode_thread(VideoState* state) {
 						}
 				}
 
-
-        if (packet->stream_index == state->video_stream_index && !state->video_queue.full()) {
-            decode_video_packet(state, packet, vf);
-            if (vf.data != nullptr) {
-                state->video_queue.enqueue(vf);
-                cout << "Video frame enqueued, PTS: " << vf.pts << endl;
-            }
-        } else if (packet->stream_index == state->audio_stream_index && !state->audio_queue.full()) {
-            decode_audio_packet(state, packet, ad);
-            if (ad.data != nullptr) {
-                state->audio_queue.enqueue(ad);
-                cout << "Audio data enqueued, PTS: " << ad.pts << endl;
-            }
-        }
 				av_packet_unref(packet);	
     }
     av_packet_free(&packet);
@@ -101,6 +110,14 @@ void monitor_queue_sizes(VideoState* state) {
         // Pausar brevemente antes de la siguiente medición
         this_thread::sleep_for(chrono::seconds(1));
     }
+}
+
+void prebuffer(VideoState* state) {
+    cout << "Starting prebuffering..." << endl;
+    while (state->audio_queue.size() < AUDIO_PREBUFFER_THRESHOLD) {
+        cout << "Waiting for more frames... Video queue: " << state->video_queue.size() << "Audio queue: " << state->audio_queue.size() << endl;
+    }
+    cout << "Prebuffering complete. Video and audio queues are filled." << endl;
 }
 
 
@@ -177,17 +194,18 @@ int main(int argc, const char** argv) {
     using Clock = chrono::high_resolution_clock;
     Clock::time_point start_time = Clock::now();
 
-		//Hilos adicionales:
+
     state.decode_thread = new thread(decode_thread, &state);
+		prebuffer(&state);
     state.audio_thread = new thread(audio_thread, &state, audio_stream);
 		thread* log_thread = new thread(monitor_queue_sizes, &state);
-		SDL_Event event;
 
+		SDL_Event event;
 		double normalized_pts;
 		double initial_video_pts = -1;
 		double video_pts;
-		VideoFrame vf;
     while (!state.quit || !state.video_queue.empty()) {
+			VideoFrame vf;
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_EVENT_QUIT) {
                 state.quit = true;
@@ -206,15 +224,14 @@ int main(int argc, const char** argv) {
 
 						// Sincronizar el frame con el tiempo transcurrido
 						if (normalized_pts > elapsed_seconds.count()) {
-								// Esperar hasta que sea el momento de mostrar el frame
 								double wait_time = (normalized_pts - elapsed_seconds.count()) * 1000;  // Convertir a milisegundos
 								if (wait_time > 0) {
+										cout << "Wait time: %d" << wait_time << endl;
 										this_thread::sleep_for(chrono::milliseconds(static_cast<int>(wait_time)));
 								}
 						}
-						render_video_frame(&state, vf);
+					  render_video_frame(&state, vf);
 						cout << "Video frame played, PTS: " << vf.pts << endl;
-						delete[] vf.data;
 				}
 
     }
