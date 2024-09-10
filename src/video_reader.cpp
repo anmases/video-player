@@ -247,27 +247,36 @@ void decode_audio_packet(VideoState* state, AVPacket* packet, AudioData& ad) {
 	AVFrame* frame = av_frame_alloc();
 	int response = avcodec_send_packet(state->audio_codec_context, packet);
 	if (response < 0) {
-			av_frame_free(&frame);
-			return;
+		av_frame_free(&frame);
+		return;
 	}
 	response = avcodec_receive_frame(state->audio_codec_context, frame);
 	if(response < 0){
 		cout << "Couldn't receive audio frame: " << response << endl;
+		av_frame_free(&frame);
+		return;
 	}
 
-	int dst_nb_samples = av_rescale_rnd(
-			swr_get_delay(state->swr_context, state->audio_codec_context->sample_rate) + frame->nb_samples,
-			state->audio_codec_context->sample_rate,
-			state->audio_codec_context->sample_rate,
-			AV_ROUND_UP
-	);
 	double valid_pts = (frame->pts != AV_NOPTS_VALUE) ? frame->pts : frame -> best_effort_timestamp;
 	ad.pts = valid_pts * av_q2d(state->audio_codec_context->time_base);
-	int data_size = av_samples_get_buffer_size(nullptr, state->audio_codec_context->ch_layout.nb_channels, dst_nb_samples, AV_SAMPLE_FMT_S16, 1);
-	ad.data = new uint8_t[data_size];
-	ad.size = data_size;
-	uint8_t* out[] = { ad.data };
-	swr_convert(state->swr_context, out, dst_nb_samples, (const uint8_t**)frame->data, frame->nb_samples);
+	ad.nb_samples = frame->nb_samples;
+
+	
+    // Vamos a copiar todos los planos de audio
+    for (int i = 0; i < AV_NUM_DATA_POINTERS && frame->data[i]; i++) {
+        int num_bytes = av_samples_get_buffer_size(
+            nullptr, state->audio_codec_context->ch_layout.nb_channels, 
+            frame->nb_samples, 
+            state->audio_codec_context->sample_fmt, 1
+        );
+        if (num_bytes <= 0) {
+            cout << "Invalid size for audio plane: " << i << " : " << num_bytes << endl;
+            continue;
+        }
+				ad.size[i] = num_bytes;
+        ad.data[i] = new uint8_t[num_bytes];
+        memcpy(ad.data[i], frame->data[i], num_bytes);
+    }
 	
 	av_frame_free(&frame);
 }

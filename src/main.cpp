@@ -13,7 +13,6 @@ mutex render_mutex;
 void decode_thread(VideoState* state) {
    	AVPacket* packet = av_packet_alloc();
     bool end_of_stream = false;
-		AudioData ad;
 		double packet_dts;
 
     // Tiempo de inicio
@@ -44,7 +43,8 @@ void decode_thread(VideoState* state) {
 							cout << "Video frame enqueued, PTS: " << vf.pts << endl;
 					}
         } else if (packet->stream_index == state->audio_stream_index && !state->audio_queue.full()) {
-            decode_audio_packet(state, packet, ad);
+            AudioData ad;
+						decode_audio_packet(state, packet, ad);
             if (ad.data != nullptr) {
                 state->audio_queue.enqueue(ad);
                 cout << "Audio data enqueued, PTS: " << ad.pts << endl;
@@ -86,20 +86,34 @@ void decode_thread(VideoState* state) {
 /// @param state 
 /// @param audio_stream 
 void audio_thread(VideoState* state, SDL_AudioStream* audio_stream) {
-		AudioData ad;
 		static double initial_audio_pts = -1;
 		double audio_pts;
     while (!state->quit || !state->audio_queue.empty()) {
+			AudioData ad;
         if (state->audio_queue.dequeue(ad)) {
 						audio_pts = ad.pts;
 						if(initial_audio_pts < 0){
 							initial_audio_pts = audio_pts;
 						}
-            if (SDL_PutAudioStreamData(audio_stream, ad.data, ad.size) == SDL_FALSE) {
+						//Resample:
+						int dst_nb_samples = av_rescale_rnd(
+							swr_get_delay(state->swr_context, state->audio_codec_context->sample_rate) + ad.nb_samples,
+							state->audio_codec_context->sample_rate,
+							state->audio_codec_context->sample_rate,
+							AV_ROUND_UP
+						);
+						int data_size = av_samples_get_buffer_size(nullptr, state->audio_codec_context->ch_layout.nb_channels, dst_nb_samples, AV_SAMPLE_FMT_S16, 1);
+						uint8_t* resampled_data = new uint8_t[data_size];  // Para almacenar el audio escalado
+						// Realizar la conversión de muestras
+            uint8_t* out[] = { resampled_data };
+            swr_convert(state->swr_context, out, dst_nb_samples, (const uint8_t**)ad.data, ad.nb_samples);
+
+						// Renderizar el audio con SDL
+            if (SDL_PutAudioStreamData(audio_stream, resampled_data, data_size) == SDL_FALSE) {
               cout << "Error while putting audio data: " << SDL_GetError() << endl;
             }
             state->audio_clock = (audio_pts - initial_audio_pts);
-            delete[] ad.data;
+            delete[] resampled_data;
             cout << "Audio chunk played, PTS: " << state->audio_clock << endl;
         }
     }

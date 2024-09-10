@@ -101,10 +101,64 @@ public:
 
 /// @brief Class that contains basic audio chunk data.
 class AudioData {
+
 public:
-    uint8_t* data = nullptr;
-    int size;
-    double pts;
+	uint8_t* data[AV_NUM_DATA_POINTERS];
+	int size[AV_NUM_DATA_POINTERS];
+	double pts;
+	int nb_samples;
+	/// @brief Default constructor
+	AudioData() : pts(0.0), nb_samples(0){
+		for (int i = 0; i < AV_NUM_DATA_POINTERS; i++) {
+				size[i] = 0;
+				data[i] = nullptr;
+		}
+	}
+	/// @brief Deep copy constructor
+	/// @param other 
+	AudioData(const AudioData& other) {
+		deep_copy(other);
+	}
+	AudioData& operator=(const AudioData& other) {
+		if (this != &other) {
+				release_data();  // Liberar la memoria actual antes de copiar
+				deep_copy(other);
+		}
+		return *this;
+	}
+	/// @brief Default destructor to release dynamic memory.
+	~AudioData(){
+		release_data();
+	}
+
+private:
+	/// @brief Makes a deep copy from other instance.
+	/// @param other 
+	/// @return true if copy has been completed, false if there is an error.
+	void deep_copy(const AudioData& other) {
+		pts = other.pts;
+		nb_samples = other.nb_samples;
+		for (int i = 0; i < AV_NUM_DATA_POINTERS; ++i) {
+				if (other.data[i] != nullptr && other.size[i] > 0) {
+						size[i] = other.size[i];
+						data[i] = new uint8_t[size[i]];
+						memcpy(data[i], other.data[i], size[i]);
+				} else {
+						data[i] = nullptr;
+						size[i] = 0;
+				}
+		}
+	}
+	/// @brief Releases data from deep object fields.
+	void release_data() {
+		pts = 0.0;
+		nb_samples = 0;
+		for (int i = 0; i < AV_NUM_DATA_POINTERS; ++i) {
+				delete[] data[i];
+				data[i] = nullptr;
+				size[i] = 0;
+		}
+	}
 };
 
 /// @brief Thread-safe queue with a maximum size limit.
